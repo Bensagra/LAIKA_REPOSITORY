@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Resolver Laberintos</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; padding: 24px 16px; }
+    .container { max-width: 900px; margin: 0 auto; }
+
+    h1 { font-size: 1.5rem; font-weight: 700; color: #f1f5f9; margin-bottom: 4px; }
+    .subtitle { font-size: 0.88rem; color: #64748b; margin-bottom: 24px; }
+
+    .upload-area {
+      border: 2px dashed #334155; border-radius: 12px; padding: 32px;
+      text-align: center; cursor: pointer; transition: border-color .2s;
+      background: #1e293b; margin-bottom: 20px;
+    }
+    .upload-area:hover { border-color: #6366f1; }
+    .upload-area input { display: none; }
+    .upload-area p { color: #94a3b8; font-size: 0.9rem; margin-top: 8px; }
+    .upload-area small { color: #475569; font-size: 0.78rem; }
+
+    .steps { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .step-badge {
+      padding: 6px 14px; border-radius: 20px; font-size: 0.82rem; font-weight: 600;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .step-badge.pending { background: #1e293b; color: #64748b; border: 1px solid #334155; }
+    .step-badge.active  { background: #312e81; color: #a5b4fc; border: 1px solid #4f46e5; }
+    .step-badge.done    { background: #14532d; color: #86efac; border: 1px solid #16a34a; }
+
+    .canvas-wrap {
+      position: relative; display: none;
+      border-radius: 10px; overflow: hidden;
+      border: 1px solid #334155; background: #000; margin-bottom: 16px;
+    }
+    #mazeCanvas { display: block; width: 100%; cursor: crosshair; }
+
+    .controls { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+    .btn {
+      padding: 10px 20px; border: none; border-radius: 8px;
+      font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: background .2s;
+    }
+    .btn-primary { background: #6366f1; color: white; }
+    .btn-primary:hover { background: #4f46e5; }
+    .btn-primary:disabled { background: #3730a3; color: #818cf8; cursor: not-allowed; }
+    .btn-secondary { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+    .btn-secondary:hover { background: #334155; color: #e2e8f0; }
+
+    .slider-row { display: flex; align-items: center; gap: 10px; font-size: 0.82rem; color: #64748b; flex-wrap: wrap; }
+    .slider-row input { flex: 1; max-width: 160px; accent-color: #6366f1; }
+    .btn-invert { background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 5px 12px; border-radius: 6px; font-size: 0.8rem; cursor: pointer; }
+    .btn-invert:hover { background: #334155; }
+
+    #status { padding: 10px 16px; border-radius: 8px; font-size: 0.88rem; display: none; margin-bottom: 12px; }
+    .status-info    { background: #0f3460; color: #93c5fd; }
+    .status-success { background: #14532d; color: #86efac; }
+    .status-error   { background: #7f1d1d; color: #fca5a5; }
+
+    .legend { display: flex; gap: 16px; font-size: 0.78rem; color: #64748b; flex-wrap: wrap; }
+    .legend span { display: flex; align-items: center; gap: 5px; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Resolver Laberintos</h1>
+  <p class="subtitle">Cargá una imagen &middot; Marcá entrada y salida &middot; El algoritmo encuentra el camino más corto</p>
+
+  <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+    <input type="file" id="fileInput" accept="image/*">
+    <svg width="32" height="32" fill="none" stroke="#475569" stroke-width="1.5" viewBox="0 0 24 24" style="margin:0 auto">
+      <path d="M12 16V4m0 0L8 8m4-4 4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>
+    </svg>
+    <p>Hacé clic para subir la imagen del laberinto</p>
+    <small>JPEG &middot; PNG &middot; WEBP</small>
+  </div>
+
+  <div class="steps" id="stepsRow" style="display:none">
+    <div class="step-badge" id="s1">1 · Imagen cargada</div>
+    <div class="step-badge pending" id="s2">2 · Clic en la ENTRADA (verde)</div>
+    <div class="step-badge pending" id="s3">3 · Clic en la SALIDA (rojo)</div>
+    <div class="step-badge pending" id="s4">4 · Resolver</div>
+  </div>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="mazeCanvas"></canvas>
+  </div>
+
+  <div id="status"></div>
+
+  <div class="controls" id="controls" style="display:none">
+    <button class="btn btn-primary" id="btnResolver" onclick="resolverLaberinto()" disabled>Encontrar camino óptimo</button>
+    <button class="btn btn-secondary" onclick="reiniciar()">Reiniciar</button>
+  </div>
+
+  <div class="slider-row" id="sliderRow" style="display:none">
+    <span>Umbral:</span>
+    <input type="range" id="threshold" min="10" max="245" value="128" oninput="actualizarUmbral(this.value)">
+    <span id="thresholdVal">128</span>
+    <button class="btn-invert" onclick="invertir()">Invertir colores</button>
+    <span style="color:#475569">— si sigue sin funcionar, ajustá el umbral</span>
+  </div>
+
+  <div class="legend" id="legend" style="display:none;margin-top:12px">
+    <span><span class="dot" style="background:#22c55e"></span> Entrada</span>
+    <span><span class="dot" style="background:#ef4444"></span> Salida</span>
+    <span><span class="dot" style="background:#fbbf24"></span> Ruta óptima</span>
+  </div>
+</div>
+
+<script>
+  const canvas = document.getElementById('mazeCanvas');
+  const ctx    = canvas.getContext('2d');
+  let img = null, imgData = null, puntos = [], resuelto = false;
+  let threshold = 128, invertido = false;
+
+  document.getElementById('fileInput').addEventListener('change', function() {
+    const file = this.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => cargarImagen(e.target.result);
+    reader.readAsDataURL(file);
+  });
+
+  function cargarImagen(src) {
+    img = new Image();
+    img.onload = () => {
+      const maxW = Math.min(img.width, 860);
+      const sc   = maxW / img.width;
+      canvas.width  = Math.round(img.width  * sc);
+      canvas.height = Math.round(img.height * sc);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      // Auto-detectar umbral (Otsu) y si los colores necesitan invertirse
+      threshold = otsu(imgData.data);
+      invertido = detectarInvertido(imgData.data, canvas.width, canvas.height);
+      document.getElementById('threshold').value          = threshold;
+      document.getElementById('thresholdVal').textContent = threshold;
+
+      puntos = []; resuelto = false;
+      document.getElementById('canvasWrap').style.display = 'block';
+      document.getElementById('controls').style.display   = 'flex';
+      document.getElementById('sliderRow').style.display  = 'flex';
+      document.getElementById('legend').style.display     = 'flex';
+      document.getElementById('stepsRow').style.display   = 'flex';
+      setStep(2);
+      const inv = invertido ? ' (modo invertido: caminos oscuros)' : '';
+      showStatus('Hacé clic en la ENTRADA del laberinto' + inv, 'info');
+    };
+    img.src = src;
+  }
+
+  // Umbral óptimo por método de Otsu
+  function otsu(data) {
+    const hist  = new Float64Array(256);
+    const total = data.length / 4;
+    for (let i = 0; i < data.length; i += 4) {
+      hist[Math.round(0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2])]++;
+    }
+    let sum = 0;
+    for (let t = 0; t < 256; t++) sum += t * hist[t];
+    let sumB = 0, wB = 0, max = 0, best = 128;
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t]; if (!wB) continue;
+      const wF = total - wB; if (!wF) break;
+      sumB += t * hist[t];
+      const mB = sumB / wB, mF = (sum - sumB) / wF;
+      const between = wB * wF * (mB - mF) ** 2;
+      if (between > max) { max = between; best = t; }
+    }
+    return best;
+  }
+
+  // Si el borde de la imagen es mayoritariamente oscuro, los caminos son oscuros → invertir
+  function detectarInvertido(data, w, h) {
+    const margin = Math.max(3, Math.round(Math.min(w, h) * 0.015));
+    let sum = 0, count = 0;
+    for (let x = 0; x < w; x++) {
+      for (let m = 0; m < margin; m++) {
+        for (const y of [m, h - 1 - m]) {
+          const i = (y * w + x) * 4;
+          sum += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+          count++;
+        }
+      }
+    }
+    for (let y = 0; y < h; y++) {
+      for (let m = 0; m < margin; m++) {
+        for (const x of [m, w - 1 - m]) {
+          const i = (y * w + x) * 4;
+          sum += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+          count++;
+        }
+      }
+    }
+    return (sum / count) < threshold;
+  }
+
+  function lum(data, w, x, y) {
+    const i = (y * w + x) * 4;
+    return 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+  }
+
+  function esLibrePx(x, y) {
+    const w = canvas.width, h = canvas.height;
+    if (x < 0 || y < 0 || x >= w || y >= h) return false;
+    const l = lum(imgData.data, w, x, y);
+    return invertido ? l < threshold : l >= threshold;
+  }
+
+  function dibujarImagen() {
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    puntos.forEach((p, i) => dibujarPunto(p.x, p.y, i === 0 ? '#22c55e' : '#ef4444'));
+  }
+
+  function dibujarPunto(x, y, color) {
+    ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2);
+    ctx.fillStyle = color; ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+  }
+
+  canvas.addEventListener('click', function(e) {
+    if (resuelto || puntos.length >= 2) return;
+    const rect = canvas.getBoundingClientRect();
+    const cx = Math.round((e.clientX - rect.left) * canvas.width  / rect.width);
+    const cy = Math.round((e.clientY - rect.top)  * canvas.height / rect.height);
+    const snap = pixelLibreMasCercano(cx, cy, 40);
+    if (!snap) { showStatus('No hay camino libre cerca. Intentá otro punto o ajustá el umbral.', 'error'); return; }
+    puntos.push(snap);
+    dibujarPunto(snap.x, snap.y, puntos.length === 1 ? '#22c55e' : '#ef4444');
+    if (puntos.length === 1) {
+      setStep(3);
+      showStatus('Ahora hacé clic en la SALIDA del laberinto', 'info');
+    } else {
+      setStep(4);
+      showStatus('Listo. Presioná "Encontrar camino óptimo"', 'info');
+      document.getElementById('btnResolver').disabled = false;
+    }
+  });
+
+  function pixelLibreMasCercano(cx, cy, radio) {
+    for (let r = 0; r <= radio; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+          if (esLibrePx(cx + dx, cy + dy)) return { x: cx + dx, y: cy + dy };
+        }
+      }
+    }
+    return null;
+  }
+
+  function actualizarUmbral(val) {
+    threshold = parseInt(val);
+    document.getElementById('thresholdVal').textContent = val;
+    puntos = []; resuelto = false;
+    dibujarImagen(); setStep(2);
+    showStatus('Umbral cambiado. Volvé a marcar entrada y salida.', 'info');
+    document.getElementById('btnResolver').disabled = true;
+  }
+
+  function invertir() {
+    invertido = !invertido;
+    puntos = []; resuelto = false;
+    dibujarImagen(); setStep(2);
+    showStatus('Colores ' + (invertido ? 'invertidos' : 'normales') + '. Volvé a marcar entrada y salida.', 'info');
+    document.getElementById('btnResolver').disabled = true;
+  }
+
+  function reiniciar() {
+    puntos = []; resuelto = false;
+    if (img) { dibujarImagen(); setStep(2); showStatus('Hacé clic en la ENTRADA del laberinto', 'info'); }
+    document.getElementById('btnResolver').disabled = true;
+    document.getElementById('btnResolver').textContent = 'Encontrar camino óptimo';
+  }
+
+  function resolverLaberinto() {
+    if (puntos.length < 2) return;
+    const btn = document.getElementById('btnResolver');
+    btn.disabled = true; btn.textContent = 'Calculando...';
+    setTimeout(() => {
+      try {
+        // Intento 1: con filtro exterior (bloquea el espacio fuera del laberinto)
+        let path = bfs(puntos[0], puntos[1], true);
+        // Fallback: sin filtro (por si la apertura es muy ancha)
+        if (!path) path = bfs(puntos[0], puntos[1], false);
+        if (!path) {
+          showStatus('No se encontró camino. Probá ajustar el umbral o presioná "Invertir colores".', 'error');
+        } else {
+          dibujarCamino(path);
+          resuelto = true;
+          showStatus('Camino optimo encontrado · ' + path.length + ' pasos', 'success');
+          setStep(4, true);
+        }
+      } catch(err) {
+        showStatus('Error: ' + err.message, 'error');
+      }
+      btn.disabled = false; btn.textContent = 'Encontrar camino óptimo';
+    }, 30);
+  }
+
+  function bfs(start, end, usarFiltroExterior) {
+    const w = canvas.width, h = canvas.height;
+    const idx = (x, y) => y * w + x;
+    const DIRS = [[-1,0],[1,0],[0,-1],[0,1]];
+    const s = idx(start.x, start.y), e = idx(end.x, end.y);
+
+    // Guard proporcional al tamaño: evita que el flood-fill se filtre por las aperturas
+    const GUARD = Math.max(25, Math.round(Math.min(w, h) * 0.05));
+    function esGuardado(x, y) {
+      return (Math.abs(x - start.x) <= GUARD && Math.abs(y - start.y) <= GUARD) ||
+             (Math.abs(x - end.x)   <= GUARD && Math.abs(y - end.y)   <= GUARD);
+    }
+
+    let exterior = null;
+    if (usarFiltroExterior) {
+      exterior = new Uint8Array(w * h);
+      const bq = [];
+      function seed(x, y) {
+        if (!esLibrePx(x, y) || esGuardado(x, y) || exterior[idx(x,y)]) return;
+        exterior[idx(x,y)] = 1; bq.push(idx(x,y));
+      }
+      for (let x = 0; x < w; x++) { seed(x, 0); seed(x, h-1); }
+      for (let y = 0; y < h; y++) { seed(0, y); seed(w-1, y); }
+      let bh = 0;
+      while (bh < bq.length) {
+        const cur = bq[bh++];
+        const cx = cur % w, cy = Math.floor(cur / w);
+        for (const [dx,dy] of DIRS) {
+          const nx = cx+dx, ny = cy+dy;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+          const ni = idx(nx, ny);
+          if (esLibrePx(nx,ny) && !esGuardado(nx,ny) && !exterior[ni]) {
+            exterior[ni] = 1; bq.push(ni);
+          }
+        }
+      }
+    }
+
+    const visited = new Uint8Array(w * h);
+    const prev    = new Int32Array(w * h).fill(-1);
+    const queue   = [s];
+    visited[s] = 1;
+    let head = 0;
+
+    while (head < queue.length) {
+      const cur = queue[head++];
+      if (cur === e) break;
+      const cx = cur % w, cy = Math.floor(cur / w);
+      for (const [dx,dy] of DIRS) {
+        const nx = cx+dx, ny = cy+dy, ni = idx(nx,ny);
+        const ok = esLibrePx(nx,ny) && !visited[ni] && (ni === e || !exterior || !exterior[ni]);
+        if (ok) { visited[ni] = 1; prev[ni] = cur; queue.push(ni); }
+      }
+    }
+
+    if (prev[e] === -1 && s !== e) return null;
+    const path = [];
+    let cur = e;
+    while (cur !== -1) { path.push({ x: cur % w, y: Math.floor(cur / w) }); cur = prev[cur]; }
+    return path.reverse();
+  }
+
+  function dibujarCamino(path) {
+    dibujarImagen();
+    ctx.beginPath();
+    ctx.moveTo(path[0].x, path[0].y);
+    for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
+    ctx.strokeStyle = '#fbbf24';
+    ctx.lineWidth   = Math.max(2, Math.round(canvas.width / 180));
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
+    puntos.forEach((p, i) => dibujarPunto(p.x, p.y, i === 0 ? '#22c55e' : '#ef4444'));
+  }
+
+  function setStep(n, done) {
+    [1,2,3,4].forEach(i => {
+      const el = document.getElementById('s' + i);
+      el.className = i < n ? 'step-badge done'
+                  : i === n ? (done ? 'step-badge done' : 'step-badge active')
+                  : 'step-badge pending';
+    });
+  }
+
+  function showStatus(msg, type) {
+    const el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = type === 'info' ? 'status-info' : type === 'success' ? 'status-success' : 'status-error';
+    el.style.display = 'block';
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Analizador de Daños en Edificios</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #f0f2f5; }
+
+    nav {
+      background: #1a1a2e; padding: 0 24px; display: flex; align-items: center;
+      gap: 24px; height: 52px;
+    }
+    nav span { color: white; font-weight: bold; font-size: 1rem; margin-right: auto; }
+    nav button {
+      background: none; border: none; color: #a5b4fc; cursor: pointer;
+      font-size: 0.9rem; padding: 6px 14px; border-radius: 6px;
+    }
+    nav button.active, nav button:hover { background: #4f46e5; color: white; }
+
+    .page { display: none; padding: 32px 16px; max-width: 700px; margin: 0 auto; }
+    .page.active { display: block; }
+
+    /* ---- ANALIZAR ---- */
+    .card { background: white; border-radius: 12px; padding: 32px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); }
+    h1 { font-size: 1.3rem; margin-bottom: 24px; color: #1a1a2e; }
+    .upload-area {
+      border: 2px dashed #ccc; border-radius: 8px; padding: 40px;
+      text-align: center; cursor: pointer; margin-bottom: 16px; transition: border-color .2s;
+    }
+    .upload-area:hover { border-color: #4f46e5; }
+    .upload-area input { display: none; }
+    .upload-area p { color: #666; margin-top: 8px; font-size: 0.9rem; }
+    #preview { width: 100%; border-radius: 8px; margin-bottom: 16px; display: none; max-height: 280px; object-fit: cover; }
+    #btnAnalizar { width: 100%; padding: 12px; background: #4f46e5; color: white; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; display: none; }
+    #btnAnalizar:hover { background: #4338ca; }
+    #btnAnalizar:disabled { background: #a5b4fc; cursor: not-allowed; }
+    #resultadoManual { margin-top: 20px; }
+
+    /* ---- RESULTADOS ---- */
+    #resultsPage { max-width: 900px; }
+    .toolbar { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+    .toolbar input {
+      flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 0.9rem;
+    }
+    #btnRefresh {
+      padding: 8px 16px; background: #4f46e5; color: white; border: none;
+      border-radius: 8px; cursor: pointer; font-size: 0.9rem; white-space: nowrap;
+    }
+    #btnRefresh:hover { background: #4338ca; }
+    .stats { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .stat { background: white; border-radius: 8px; padding: 12px 20px; flex: 1; min-width: 100px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); text-align: center; }
+    .stat .num { font-size: 1.8rem; font-weight: bold; color: #4f46e5; }
+    .stat .lbl { font-size: 0.8rem; color: #666; margin-top: 2px; }
+    .result-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+    .result-card {
+      background: white; border-radius: 10px; overflow: hidden;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.1); transition: transform .15s;
+    }
+    .result-card:hover { transform: translateY(-2px); }
+    .sev-bar { height: 6px; }
+    .result-body { padding: 14px; }
+    .result-nombre { font-weight: bold; font-size: 0.9rem; color: #1a1a2e; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .result-fecha { font-size: 0.75rem; color: #999; margin-bottom: 10px; }
+    .sev-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 10px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; margin-bottom: 10px;
+    }
+    .result-resumen { font-size: 0.82rem; color: #555; line-height: 1.45; margin-bottom: 10px; }
+    .dano-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+    .chip { background: #f1f5f9; border-radius: 12px; padding: 2px 9px; font-size: 0.75rem; color: #475569; }
+    .empty { text-align: center; color: #999; padding: 60px 0; font-size: 0.95rem; }
+
+    /* severidad 1-10 colores */
+    .s-low  { background: #d1fae5; color: #065f46; }
+    .s-mid  { background: #fef9c3; color: #854d0e; }
+    .s-high { background: #fed7aa; color: #9a3412; }
+    .s-crit { background: #fecaca; color: #991b1b; }
+    .bar-low  { background: #10b981; }
+    .bar-mid  { background: #f59e0b; }
+    .bar-high { background: #f97316; }
+    .bar-crit { background: #ef4444; }
+    .no-dano { background: #e0f2fe; color: #0369a1; }
+    .bar-none { background: #38bdf8; }
+
+    /* resultado inline */
+    .inline-result { margin-top: 16px; }
+    .inline-result .sev-badge { margin-bottom: 8px; }
+    .inline-result .dano-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+    .inline-result .dano-tipo { font-weight: bold; font-size: 0.9rem; }
+    .inline-result .dano-meta { font-size: 0.8rem; color: #666; margin: 3px 0; }
+    .inline-result .dano-desc { font-size: 0.85rem; color: #444; }
+    .error { color: #dc2626; background: #fef2f2; padding: 12px; border-radius: 8px; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <span>Daños en Edificios</span>
+  <button class="active" onclick="showPage('analyze', this)">Analizar foto</button>
+  <button onclick="showPage('results', this)">Ver resultados</button>
+</nav>
+
+<!-- PÁGINA ANALIZAR -->
+<div class="page active" id="analyzePage">
+  <div class="card" style="margin-top:24px">
+    <h1>Subir imagen para analizar</h1>
+    <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+      <input type="file" id="fileInput" accept="image/*">
+      <svg width="36" height="36" fill="none" stroke="#aaa" stroke-width="1.5" viewBox="0 0 24 24">
+        <path d="M12 16V4m0 0L8 8m4-4 4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>
+      </svg>
+      <p>Hacé clic para subir una foto del edificio</p>
+      <p style="font-size:.8rem;color:#bbb;margin-top:4px">JPEG, PNG o WEBP</p>
+    </div>
+    <img id="preview" alt="Vista previa">
+    <button id="btnAnalizar" onclick="analizarManual()">Analizar daños</button>
+    <div id="resultadoManual"></div>
+  </div>
+</div>
+
+<!-- PÁGINA RESULTADOS -->
+<div class="page" id="resultsPage">
+  <div style="margin-top:24px">
+    <div class="toolbar">
+      <input type="text" id="searchInput" placeholder="Buscar por nombre de imagen..." oninput="renderResults()">
+      <button id="btnRefresh" onclick="cargarResultados()">Actualizar</button>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="result-grid" id="resultGrid"></div>
+  </div>
+</div>
+
+<script>
+  let todosLosResultados = [];
+
+  function showPage(name, btn) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    document.getElementById(name + 'Page').classList.add('active');
+    btn.classList.add('active');
+    if (name === 'results') cargarResultados();
+  }
+
+  // ---- ANALIZAR ----
+  document.getElementById('fileInput').addEventListener('change', function() {
+    const file = this.files[0];
+    if (!file) return;
+    const preview = document.getElementById('preview');
+    preview.src = URL.createObjectURL(file);
+    preview.style.display = 'block';
+    document.getElementById('btnAnalizar').style.display = 'block';
+    document.getElementById('resultadoManual').innerHTML = '';
+  });
+
+  async function analizarManual() {
+    const file = document.getElementById('fileInput').files[0];
+    if (!file) return;
+    const btn = document.getElementById('btnAnalizar');
+    btn.disabled = true; btn.textContent = 'Analizando...';
+    try {
+      const form = new FormData();
+      form.append('image', file);
+      const res = await fetch('/analyze', { method: 'POST', body: form });
+      const data = await res.json();
+      if (data.error) { document.getElementById('resultadoManual').innerHTML = `<div class="error">${data.error}</div>`; return; }
+      document.getElementById('resultadoManual').innerHTML = renderInline(data);
+    } catch(e) {
+      document.getElementById('resultadoManual').innerHTML = `<div class="error">No se pudo conectar al servidor.</div>`;
+    } finally {
+      btn.disabled = false; btn.textContent = 'Analizar daños';
+    }
+  }
+
+  function renderInline(data) {
+    const sev = data.nivel_severidad_general || 0;
+    const { cls } = sevInfo(sev);
+    let dañosHtml = (data.daños_detectados || []).map(d => `
+      <div class="dano-item">
+        <div class="dano-tipo">${d.tipo}</div>
+        <div class="dano-meta">Severidad: <strong>${d.severidad}/10</strong></div>
+        <div class="dano-desc">${d.descripcion}</div>
+      </div>`).join('');
+    return `<div class="inline-result">
+      <span class="sev-badge ${cls}">${data.tiene_daños ? `Severidad ${sev}/10` : 'Sin daños'}</span>
+      <p style="font-size:.88rem;color:#444;margin-bottom:12px">${data.resumen}</p>
+      ${dañosHtml}
+    </div>`;
+  }
+
+  // ---- RESULTADOS ----
+  async function cargarResultados() {
+    try {
+      const res = await fetch('/results');
+      todosLosResultados = await res.json();
+      renderResults();
+    } catch(e) {
+      document.getElementById('resultGrid').innerHTML = `<div class="error">No se pudieron cargar los resultados.</div>`;
+    }
+  }
+
+  function renderResults() {
+    const q = document.getElementById('searchInput').value.toLowerCase();
+    const filtered = todosLosResultados.filter(r => r.imagen.toLowerCase().includes(q));
+
+    // stats
+    const total = filtered.length;
+    const conDanos = filtered.filter(r => r.tiene_daños).length;
+    const promSev = total ? (filtered.reduce((s, r) => s + (r.nivel_severidad_general || 0), 0) / total).toFixed(1) : 0;
+    const maxSev = total ? Math.max(...filtered.map(r => r.nivel_severidad_general || 0)) : 0;
+    document.getElementById('stats').innerHTML = `
+      <div class="stat"><div class="num">${total}</div><div class="lbl">Imágenes</div></div>
+      <div class="stat"><div class="num">${conDanos}</div><div class="lbl">Con daños</div></div>
+      <div class="stat"><div class="num">${promSev}</div><div class="lbl">Severidad promedio</div></div>
+      <div class="stat"><div class="num">${maxSev}</div><div class="lbl">Máx. severidad</div></div>`;
+
+    if (!filtered.length) {
+      document.getElementById('resultGrid').innerHTML = `<div class="empty">No hay resultados todavía.<br>Copiá imágenes a la carpeta <strong>imagenes/</strong></div>`;
+      return;
+    }
+
+    document.getElementById('resultGrid').innerHTML = filtered
+      .sort((a, b) => (b.nivel_severidad_general || 0) - (a.nivel_severidad_general || 0))
+      .map(r => {
+        const sev = r.nivel_severidad_general || 0;
+        const { cls, barCls } = sevInfo(sev);
+        const chips = (r.daños_detectados || []).map(d => `<span class="chip">${d.tipo}</span>`).join('');
+        const fecha = r.fecha ? new Date(r.fecha).toLocaleString('es-AR') : '';
+        return `<div class="result-card">
+          <div class="sev-bar ${barCls}" style="width:${sev * 10}%"></div>
+          <div class="result-body">
+            <div class="result-nombre" title="${r.imagen}">${r.imagen}</div>
+            <div class="result-fecha">${fecha}</div>
+            <span class="sev-badge ${cls}">${r.tiene_daños ? `Severidad ${sev}/10` : 'Sin daños'}</span>
+            <p class="result-resumen">${r.resumen}</p>
+            <div class="dano-chips">${chips}</div>
+          </div>
+        </div>`;
+      }).join('');
+  }
+
+  function sevInfo(sev) {
+    if (!sev || sev === 0) return { cls: 'no-dano', barCls: 'bar-none' };
+    if (sev <= 3) return { cls: 's-low', barCls: 'bar-low' };
+    if (sev <= 6) return { cls: 's-mid', barCls: 'bar-mid' };
+    if (sev <= 8) return { cls: 's-high', barCls: 'bar-high' };
+    return { cls: 's-crit', barCls: 'bar-crit' };
+  }
+</script>
+</body>
+</html>

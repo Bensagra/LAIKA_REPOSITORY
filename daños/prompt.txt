@@ -1,0 +1,26 @@
+Analizá la imagen recibida e identificá cualquier tipo de daño visible. Detectá grietas, roturas, rayones, deformaciones, desgaste, humedad, partes faltantes, corrosión o anomalías.
+
+Usá la siguiente escala de severidad del 1 al 10:
+1-2: Daño mínimo, estético, no afecta la estructura
+3-4: Daño leve, requiere mantenimiento preventivo
+5-6: Daño moderado, requiere reparación a corto plazo
+7-8: Daño grave, requiere reparación urgente
+9-10: Daño catastrófico, riesgo de colapso o inhabitabilidad
+
+Si no hay daños visibles, aclaralo explícitamente.
+
+Respondé ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto adicional:
+{
+  "tiene_daños": boolean,
+  "nivel_severidad_general": number (1 al 10, o 0 si no hay daños),
+  "grado_general": "descripción del grado según la escala (ej: Daño grave, requiere reparación urgente)",
+  "daños_detectados": [
+    {
+      "tipo": "tipo de daño (grieta, rotura, rayón, deformación, desgaste, humedad, parte faltante, corrosión, anomalía, etc.)",
+      "severidad": number (1 al 10),
+      "grado": "descripción del grado según la escala",
+      "descripcion": "descripción técnica breve del daño"
+    }
+  ],
+  "resumen": "si no hay daños visibles aclaralo explícitamente, si los hay describí el estado general"
+}
