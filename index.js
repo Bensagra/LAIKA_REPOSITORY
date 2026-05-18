@@ -1,9 +1,21 @@
+import pg from "pg";
+
+const { Pool } = pg;
+
 import pkg from "@prisma/client";
 
 const { PrismaClient } = pkg;
 import express from "express";
 const app = express();
 const prisma = new PrismaClient();
+const pool = new Pool({
+    user: "prisma_backend",
+    host: "10.40.5.7",
+    database: "rescue_dog_db",
+    password: "benyi2907",
+    port: 5432
+});
+
 
 app.use(express.json());
 
@@ -32,21 +44,9 @@ res.send(`Moviendo robot hacia ${direction}`);
 
 });*/
 
-app.post("/register", async (req, res) => {
+import userRoutes from "./src/routes/userRoutes.js";
+app.use("/users", userRoutes);
 
-    const { gmail, username, contrasena } = req.body;
-
-    const user = await prisma.usuario.create({
-        data: {
-            gmail,
-            username,
-            contrasena_hash: contrasena
-        }
-    });
-
-    res.json(user);
-
-});
 
 app.listen(3000, () => {
     console.log("Servidor corriendo");
