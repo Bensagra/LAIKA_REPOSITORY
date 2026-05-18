@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Laika · Go2</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, system-ui, sans-serif;
+    background: #0f1115; color: #e7e9ee;
+  }
+  header {
+    padding: 12px 18px; display: flex; align-items: center; gap: 12px;
+    border-bottom: 1px solid #222;
+  }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .5px; }
+  #conn { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #333; }
+  #conn.ok  { background: #1f6f3a; }
+  #conn.bad { background: #7a2b2b; }
+  main {
+    display: grid; gap: 16px; padding: 16px;
+    grid-template-columns: 1.5fr 1fr;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  section.card {
+    background: #161922; border: 1px solid #232735; border-radius: 10px;
+    padding: 14px;
+  }
+  section h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; color: #98a0b3; letter-spacing: 1px; }
+  .cam { aspect-ratio: 16/9; background: #000; border-radius: 8px; overflow: hidden; }
+  .cam img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  button {
+    background: #232735; color: #e7e9ee; border: 1px solid #2e3344;
+    padding: 10px 12px; border-radius: 8px; font: inherit; cursor: pointer;
+    min-width: 70px;
+  }
+  button:hover { background: #2c3145; }
+  button:active { transform: translateY(1px); }
+  button.danger { background: #7a2b2b; border-color: #8a3434; }
+  button.primary { background: #1f4e7a; border-color: #2a608f; }
+  button.toggled { background: #1f6f3a; border-color: #2a8049; }
+  .grid3 { display: grid; grid-template-columns: 70px 70px 70px; gap: 6px; justify-content: center; }
+  .pad { display: grid; grid-template-areas:
+    ".  fwd .  "
+    "lft stp rgt"
+    ".  bck .  ";
+    gap: 6px; max-width: 240px; margin: 6px auto;
+  }
+  .pad .fwd { grid-area: fwd; } .pad .bck { grid-area: bck; }
+  .pad .lft { grid-area: lft; } .pad .rgt { grid-area: rgt; }
+  .pad .stp { grid-area: stp; background:#7a2b2b; border-color:#8a3434; }
+  .slider-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+  .slider-row label { width: 90px; font-size: 12px; color: #98a0b3; }
+  input[type=range] { flex: 1; }
+  .stat {
+    display: grid; grid-template-columns: 110px 1fr; gap: 4px 12px;
+    font-size: 13px; font-variant-numeric: tabular-nums;
+  }
+  .stat dt { color: #98a0b3; }
+  .stat dd { margin: 0; word-break: break-all; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  select { background: #232735; color: #e7e9ee; border: 1px solid #2e3344; padding: 8px; border-radius: 8px; font: inherit; }
+  .log {
+    margin-top: 8px; font-family: ui-monospace, monospace; font-size: 11px;
+    max-height: 110px; overflow: auto; background: #0c0e14; border: 1px solid #232735;
+    padding: 6px 8px; border-radius: 6px; color: #98a0b3;
+  }
+  .log .err { color: #ff7777; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>LAIKA · Go2 controller</h1>
+    <span id="conn">desconectado</span>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>Cámara</h2>
+      <div class="cam"><img id="cam" alt="cam"></div>
+      <div class="toolbar" style="margin-top:10px">
+        <button id="btnCam">Cam ON</button>
+        <button id="btnLidar">Lidar OFF</button>
+        <label style="margin-left:auto;font-size:12px;color:#98a0b3">modo:</label>
+        <select id="mode">
+          <option value="normal">normal</option>
+          <option value="ai">ai</option>
+          <option value="mcf">mcf</option>
+        </select>
+        <button id="btnMode" class="primary">Aplicar</button>
+      </div>
+      <div id="log" class="log"></div>
+    </section>
+
+    <section class="card">
+      <h2>Estado</h2>
+      <dl class="stat" id="stats">
+        <dt>Batería</dt>      <dd id="s-soc">—</dd>
+        <dt>Corriente</dt>    <dd id="s-cur">—</dd>
+        <dt>Voltaje</dt>      <dd id="s-volt">—</dd>
+        <dt>Temp NTC1</dt>    <dd id="s-temp">—</dd>
+        <dt>IMU RPY</dt>      <dd id="s-rpy">—</dd>
+        <dt>Posición</dt>     <dd id="s-pos">—</dd>
+        <dt>Velocidad</dt>    <dd id="s-vel">—</dd>
+        <dt>Gait</dt>         <dd id="s-gait">—</dd>
+        <dt>Body height</dt>  <dd id="s-bh">—</dd>
+      </dl>
+    </section>
+
+    <section class="card" style="grid-column: 1 / -1">
+      <h2>Acciones</h2>
+      <div class="row" style="margin-bottom:10px">
+        <button data-action="StandUp">Stand up</button>
+        <button data-action="StandDown">Stand down</button>
+        <button data-action="BalanceStand">Balance</button>
+        <button data-action="RecoveryStand">Recovery</button>
+        <button data-action="Hello">👋 Hello</button>
+        <button data-action="Sit">Sit</button>
+        <button data-action="RiseSit">Rise sit</button>
+        <button data-action="Stretch">Stretch</button>
+        <button data-action="WiggleHips">Wiggle</button>
+        <button data-action="Dance1">Dance 1</button>
+        <button data-action="Dance2">Dance 2</button>
+        <button data-action="Damp" class="danger">DAMP</button>
+      </div>
+
+      <h2 style="margin-top:14px">Movimiento</h2>
+      <div class="pad">
+        <button class="fwd" data-move="0.4,0,0">▲</button>
+        <button class="lft" data-move="0,0.3,0">◀</button>
+        <button class="stp">STOP</button>
+        <button class="rgt" data-move="0,-0.3,0">▶</button>
+        <button class="bck" data-move="-0.4,0,0">▼</button>
+      </div>
+      <div class="row" style="justify-content:center;margin-top:8px">
+        <button data-move="0,0,0.6">⟲ yaw L</button>
+        <button data-move="0,0,-0.6">⟳ yaw R</button>
+      </div>
+      <div class="slider-row">
+        <label>x (fwd m/s)</label>
+        <input id="sx" type="range" min="-1" max="1" step="0.05" value="0">
+        <span id="sx-v">0.00</span>
+      </div>
+      <div class="slider-row">
+        <label>y (lat m/s)</label>
+        <input id="sy" type="range" min="-1" max="1" step="0.05" value="0">
+        <span id="sy-v">0.00</span>
+      </div>
+      <div class="slider-row">
+        <label>z (yaw rad/s)</label>
+        <input id="sz" type="range" min="-1.5" max="1.5" step="0.05" value="0">
+        <span id="sz-v">0.00</span>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="btnApply" class="primary">Aplicar velocidad</button>
+        <button id="btnZero">Centrar sliders</button>
+      </div>
+    </section>
+
+    <section class="card" style="grid-column: 1 / -1">
+      <h2>Audio</h2>
+      <div class="row" style="align-items:center;gap:10px">
+        <input id="audioFile" type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac,.opus">
+        <button id="btnUpload" class="primary">Subir</button>
+        <button id="btnUploadPlay" class="primary">Subir y reproducir</button>
+        <button id="btnStopAudio" class="danger" style="margin-left:auto">⏹ Stop audio</button>
+      </div>
+      <table id="audioTable" style="width:100%;margin-top:10px;border-collapse:collapse;font-size:13px">
+        <thead style="color:#98a0b3;text-align:left">
+          <tr><th style="padding:4px 6px">Archivo</th><th style="padding:4px 6px">Tamaño</th><th style="padding:4px 6px">Preview</th><th></th></tr>
+        </thead>
+        <tbody id="audioTbody"></tbody>
+      </table>
+    </section>
+
+  </main>
+
+<script>
+const $ = (q) => document.querySelector(q);
+const conn = $('#conn');
+const logBox = $('#log');
+const cam = $('#cam');
+
+function log(msg, err) {
+  const line = document.createElement('div');
+  if (err) line.className = 'err';
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  logBox.prepend(line);
+  while (logBox.childElementCount > 50) logBox.lastChild.remove();
+}
+
+// MJPEG: just point an <img> at the stream.
+cam.src = '/cam.mjpg?ts=' + Date.now();
+cam.onerror = () => log('camera stream error', true);
+
+// REST helper
+async function post(path, body) {
+  try {
+    const r = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data.ok === false) log(`${path} -> ${data.error || r.status}`, true);
+    else log(`${path} ok`);
+    return data;
+  } catch (e) { log(`${path} -> ${e}`, true); }
+}
+
+// Buttons -- actions
+document.querySelectorAll('button[data-action]').forEach(b => {
+  b.addEventListener('click', () => post('/api/cmd/action', { name: b.dataset.action }));
+});
+
+// Movement pad
+document.querySelectorAll('button[data-move]').forEach(b => {
+  b.addEventListener('click', () => {
+    const [x, y, z] = b.dataset.move.split(',').map(parseFloat);
+    post('/api/cmd/move', { x, y, z });
+  });
+});
+$('.pad .stp').addEventListener('click', () => post('/api/cmd/stop'));
+
+// Sliders
+const sx = $('#sx'), sy = $('#sy'), sz = $('#sz');
+const updateLabels = () => {
+  $('#sx-v').textContent = (+sx.value).toFixed(2);
+  $('#sy-v').textContent = (+sy.value).toFixed(2);
+  $('#sz-v').textContent = (+sz.value).toFixed(2);
+};
+[sx, sy, sz].forEach(s => s.addEventListener('input', updateLabels));
+updateLabels();
+$('#btnApply').addEventListener('click', () => post('/api/cmd/move', { x: +sx.value, y: +sy.value, z: +sz.value }));
+$('#btnZero').addEventListener('click', () => { sx.value = sy.value = sz.value = 0; updateLabels(); });
+
+// Mode
+$('#btnMode').addEventListener('click', () => post('/api/cmd/mode', { name: $('#mode').value }));
+
+// Camera / Lidar toggles
+let camOn = true, lidarOn = false;
+function setToggle(btn, on, labelOn, labelOff) {
+  btn.textContent = on ? labelOn : labelOff;
+  btn.classList.toggle('toggled', on);
+}
+const btnCam = $('#btnCam');
+setToggle(btnCam, camOn, 'Cam ON', 'Cam OFF');
+btnCam.addEventListener('click', async () => {
+  camOn = !camOn;
+  setToggle(btnCam, camOn, 'Cam ON', 'Cam OFF');
+  await post('/api/cmd/camera', { enabled: camOn });
+  if (camOn) cam.src = '/cam.mjpg?ts=' + Date.now();
+});
+const btnLidar = $('#btnLidar');
+setToggle(btnLidar, lidarOn, 'Lidar ON', 'Lidar OFF');
+btnLidar.addEventListener('click', async () => {
+  lidarOn = !lidarOn;
+  setToggle(btnLidar, lidarOn, 'Lidar ON', 'Lidar OFF');
+  await post('/api/cmd/lidar', { enabled: lidarOn });
+});
+
+// WebSocket state
+function fmtN(v, d = 2) {
+  if (v === null || v === undefined || Number.isNaN(v)) return '—';
+  return (typeof v === 'number') ? v.toFixed(d) : String(v);
+}
+function fmtArr(arr, d = 2) {
+  if (!Array.isArray(arr)) return '—';
+  return arr.map(v => fmtN(v, d)).join(', ');
+}
+function renderState(s) {
+  const sp = s.sportmode || {};
+  const ls = s.lowstate  || {};
+  $('#s-soc').textContent  = fmtN(ls?.bms?.soc, 0)  + (ls?.bms?.soc != null ? ' %' : '');
+  $('#s-cur').textContent  = fmtN(ls?.bms?.current, 0) + (ls?.bms?.current != null ? ' mA' : '');
+  $('#s-volt').textContent = fmtN(ls?.power_v, 2)  + (ls?.power_v != null ? ' V' : '');
+  $('#s-temp').textContent = fmtN(ls?.temperature_ntc1, 0) + (ls?.temperature_ntc1 != null ? ' °C' : '');
+  $('#s-rpy').textContent  = fmtArr(ls?.imu_rpy, 3);
+  $('#s-pos').textContent  = fmtArr(sp?.position, 2);
+  $('#s-vel').textContent  = fmtArr(sp?.velocity, 2);
+  $('#s-gait').textContent = sp?.gait_type ?? '—';
+  $('#s-bh').textContent   = fmtN(sp?.body_height, 2) + (sp?.body_height != null ? ' m' : '');
+}
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws/state`);
+  ws.onopen    = () => { conn.textContent = 'conectado'; conn.className = 'ok'; };
+  ws.onclose   = () => { conn.textContent = 'reconectando…'; conn.className = 'bad'; setTimeout(connectWS, 1500); };
+  ws.onerror   = () => log('ws error', true);
+  ws.onmessage = (ev) => { try { renderState(JSON.parse(ev.data)); } catch (e) { log('ws parse', true); } };
+}
+connectWS();
+
+// ---- Audio ----
+function fmtBytes(n) {
+  if (!n && n !== 0) return '—';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+async function refreshAudio() {
+  try {
+    const r = await fetch('/api/audio');
+    const data = await r.json();
+    const tbody = $('#audioTbody');
+    tbody.innerHTML = '';
+    if (!data.items.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="padding:8px;color:#98a0b3">— sin archivos —</td></tr>';
+      return;
+    }
+    for (const it of data.items) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="padding:4px 6px">${it.name}</td>
+        <td style="padding:4px 6px">${fmtBytes(it.size)}</td>
+        <td style="padding:4px 6px"><audio controls preload="none" src="${it.url}" style="height:28px;width:180px"></audio></td>
+        <td style="padding:4px 6px;text-align:right">
+          <button data-play="${it.id}" class="primary">▶ Reproducir</button>
+          <button data-del="${it.id}" class="danger">🗑</button>
+        </td>`;
+      tbody.appendChild(tr);
+    }
+    tbody.querySelectorAll('button[data-play]').forEach(b => {
+      b.addEventListener('click', () => post('/api/audio/play', { id: b.dataset.play }));
+    });
+    tbody.querySelectorAll('button[data-del]').forEach(b => {
+      b.addEventListener('click', async () => {
+        await fetch('/api/audio/' + b.dataset.del, { method: 'DELETE' });
+        refreshAudio();
+      });
+    });
+  } catch (e) { log('refreshAudio: ' + e, true); }
+}
+
+async function uploadAudio(playAfter) {
+  const f = $('#audioFile').files[0];
+  if (!f) { log('elegí un archivo primero', true); return; }
+  const fd = new FormData();
+  fd.append('file', f);
+  if (playAfter) fd.append('play', '1');
+  log(`subiendo ${f.name} (${fmtBytes(f.size)})…`);
+  try {
+    const r = await fetch('/api/audio/upload', { method: 'POST', body: fd });
+    const data = await r.json();
+    if (!r.ok || data.ok === false) log('upload error: ' + (data.error || r.status), true);
+    else log(`subido${data.played ? ' + reproduciendo' : ''}: ${data.item.name}`);
+  } catch (e) { log('upload exception: ' + e, true); }
+  refreshAudio();
+}
+
+$('#btnUpload').addEventListener('click', () => uploadAudio(false));
+$('#btnUploadPlay').addEventListener('click', () => uploadAudio(true));
+$('#btnStopAudio').addEventListener('click', () => post('/api/audio/stop'));
+refreshAudio();
+</script>
+</body>
+</html>
