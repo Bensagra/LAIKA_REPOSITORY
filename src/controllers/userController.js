@@ -1,5 +1,4 @@
-import { createUser } from "../services/userService.js";
-import { loginUser } from "../services/userService.js";
+import { createUser, loginUser } from "../services/userService.js";
 
 export const register = async (req, res) => {
 
@@ -26,26 +25,39 @@ export const register = async (req, res) => {
     }
 
 };
-
 export const login = async (req, res) => {
 
     try {
 
-        const { gmail, contrasena } = req.body;
+        const {
+            gmail,
+            contrasena
+        } = req.body;
 
         const user = await loginUser(
             gmail,
             contrasena
         );
 
-        res.json(user);
+        if (!user) {
+
+            return res.status(401).json({
+                error: "Credenciales incorrectas"
+            });
+
+        }
+
+        res.json({
+            message: "Login exitoso",
+            user
+        });
 
     } catch (error) {
 
         console.log(error);
 
-        res.status(401).json({
-            error: error.message
+        res.status(500).json({
+            error: "Error en login"
         });
 
     }

@@ -17,7 +17,6 @@ export const createUser = async (
     return user;
 
 };
-
 export const loginUser = async (
     gmail,
     contrasena
@@ -30,13 +29,12 @@ export const loginUser = async (
     });
 
     if (!user) {
-        throw new Error("Usuario no encontrado");
+        return null;
     }
 
     if (user.contrasena_hash !== contrasena) {
-        throw new Error("Contraseña incorrecta");
+        return null;
     }
 
     return user;
-
 };

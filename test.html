@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LAIKA TEST</title>
+</head>
+<body>
+    <h1>Backend Test</h1>
+
+    <button onclick="testBackend()">
+        Test Backend
+    </button>
+    
+    <hr>
+    <h1>Register</h1>
+
+    <input id="register-gmail" placeholder="gmail">
+    <input id="register-username" placeholder="username">
+    <input id="register-password" placeholder="password">
+
+    <button onclick="register()">
+        Register
+    </button>
+
+    <hr>
+
+    <h1>Login</h1>
+
+    <input id="login-gmail" placeholder="gmail">
+    <input id="login-password" placeholder="password">
+
+    <button onclick="login()">
+        Login
+    </button>
+
+    <script>
+async function testBackend() {
+
+try {
+
+    const response = await fetch(
+        "http://127.0.0.1:3000"
+    );
+
+    const data = await response.text();
+
+    console.log(data);
+
+    alert(data);
+
+} catch (error) {
+
+    console.log(error);
+
+    alert("Backend apagado");
+
+}
+
+}
+        async function register() {
+
+            try {
+
+                const gmail =
+                    document.getElementById(
+                        "register-gmail"
+                    ).value;
+
+                const username =
+                    document.getElementById(
+                        "register-username"
+                    ).value;
+
+                const contrasena =
+                    document.getElementById(
+                        "register-password"
+                    ).value;
+
+                const response = await fetch(
+                    "http://127.0.0.1:3000/users/register",
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
+
+                        body: JSON.stringify({
+                            gmail,
+                            username,
+                            contrasena
+                        })
+                    }
+                );
+
+                const data = await response.json();
+
+                console.log(data);
+
+                if (response.ok) {
+
+                    alert("Usuario registrado");
+
+                } else {
+
+                    alert(data.error);
+
+                }
+
+            } catch (error) {
+
+                console.log(error);
+
+                alert("Error conectando al backend");
+
+            }
+
+        }
+
+        async function login() {
+
+            try {
+
+                const gmail =
+                    document.getElementById(
+                        "login-gmail"
+                    ).value;
+
+                const contrasena =
+                    document.getElementById(
+                        "login-password"
+                    ).value;
+
+                const response = await fetch(
+                    "http://127.0.0.1:3000/users/login",
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
+
+                        body: JSON.stringify({
+                            gmail,
+                            contrasena
+                        })
+                    }
+                );
+
+                const data = await response.json();
+
+                console.log(data);
+
+                if (response.ok) {
+
+                    alert("Login exitoso");
+
+                } else {
+
+                    alert(data.error);
+
+                }
+
+            } catch (error) {
+
+                console.log(error);
+
+                alert("Error conectando al backend");
+
+            }
+
+        }
+
+    </script>
+
+</body>
+</html>

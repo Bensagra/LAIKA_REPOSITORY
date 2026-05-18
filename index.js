@@ -1,3 +1,4 @@
+import cors from "cors"; // para rpbar csas con live sever
 import pg from "pg";
 import pkg from "@prisma/client";
 import express from "express";
@@ -7,7 +8,7 @@ const { Pool } = pg;
 const { PrismaClient } = pkg;
 
 const app = express();
-
+app.use(cors());
 const prisma = new PrismaClient();
 
 const pool = new Pool({
