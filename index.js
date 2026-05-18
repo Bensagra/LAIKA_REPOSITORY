@@ -32,7 +32,7 @@ para conectarse al robot, por ahora fake
 */
 app.get("/robot", (req, res) => {
     res.json({
-        battery: 82,
+        battery: 85,
         speed: 1.4,
         status: "walking"
     });
