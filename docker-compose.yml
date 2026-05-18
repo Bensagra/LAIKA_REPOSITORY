@@ -1,0 +1,19 @@
+services:
+  app:
+    build: ./app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  deployer:
+    build: ./deployer
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/workspace
+    env_file: .env
