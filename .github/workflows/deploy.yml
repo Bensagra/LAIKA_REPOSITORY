@@ -1,12 +1,12 @@
- name: Deploy
+name: Deploy
 
-  on:
-    push:
-      branches: [MELI---BACKEND---DEV]
+on:
+  push:
+    branches: [MELI---BACKEND---DEV]
 
-  jobs:
-    deploy:
-      runs-on: self-hosted
-      steps:
-        - name: Redeploy
-          run: /usr/local/bin/redeploy.sh
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Redeploy
+        run: /usr/local/bin/redeploy.sh
