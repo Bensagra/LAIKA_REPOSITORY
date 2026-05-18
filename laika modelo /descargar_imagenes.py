@@ -1,30 +1,57 @@
-import fiftyone as fo
-import fiftyone.zoo as foz
+from duckduckgo_search import DDGS
+import requests
 import os
-import shutil
+import time
 
-DESTINO = "imagenes_raw"
-os.makedirs(DESTINO, exist_ok=True)
+CARPETAS = ["grieta", "humedad", "corrosion", "desgaste", "sin_danos"]
+for c in CARPETAS:
+    os.makedirs(c, exist_ok=True)
 
-print("Descargando imagenes de Open Images...")
+busquedas = [
+    ("building facade crack damage wall", "grieta", 60),
+    ("cracked concrete wall exterior building", "grieta", 60),
+    ("building wall humidity water stain damage", "humedad", 60),
+    ("facade water damage moisture building", "humedad", 60),
+    ("metal corrosion rust building structure", "corrosion", 50),
+    ("corroded iron beam building deterioration", "corrosion", 50),
+    ("building facade wear deterioration old", "desgaste", 50),
+    ("worn exterior wall building paint peeling", "desgaste", 50),
+    ("clean new building facade exterior", "sin_danos", 60),
+    ("modern building wall no damage", "sin_danos", 60),
+]
 
-dataset = foz.load_zoo_dataset(
-    "open-images-v7",
-    split="train",
-    classes=["Building"],
-    max_samples=300,
-    only_matching=True,
-)
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-print(f"Descargadas: {len(dataset)} imagenes")
+def descargar(url, ruta):
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=8)
+        if r.status_code == 200 and "image" in r.headers.get("Content-Type", ""):
+            with open(ruta, "wb") as f:
+                f.write(r.content)
+            return True
+    except:
+        pass
+    return False
 
-copiadas = 0
-for muestra in dataset:
-    origen = muestra.filepath
-    ext = os.path.splitext(origen)[1].lower()
-    if ext in [".jpg", ".jpeg", ".png"]:
-        nombre = f"edificio_{copiadas:04d}{ext}"
-        shutil.copy2(origen, os.path.join(DESTINO, nombre))
-        copiadas += 1
+total = 0
+for termino, carpeta, cantidad in busquedas:
+    print(f"\nBuscando: '{termino}'")
+    existentes = len(os.listdir(carpeta))
+    descargadas = 0
+    try:
+        with DDGS() as ddgs:
+            resultados = list(ddgs.images(termino, max_results=cantidad))
+        for r in resultados:
+            nombre = f"{existentes + descargadas:04d}.jpg"
+            ruta = os.path.join(carpeta, nombre)
+            if descargar(r["image"], ruta):
+                descargadas += 1
+            time.sleep(0.3)
+    except Exception as e:
+        print(f"  Error: {e}")
+    print(f"  Descargadas: {descargadas}")
+    total += descargadas
 
-print(f"Listo. {copiadas} imagenes guardadas en '{DESTINO}/'")
+print(f"\nTotal: {total} imagenes")
+for c in CARPETAS:
+    print(f"  {c}/: {len(os.listdir(c))} imagenes")
