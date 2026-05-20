@@ -3,21 +3,14 @@ import requests
 import os
 import time
 
-CARPETAS = ["grieta", "humedad", "corrosion", "desgaste", "sin_danos"]
-for c in CARPETAS:
-    os.makedirs(c, exist_ok=True)
-
 busquedas = [
-    ("building facade crack damage wall", "grieta", 60),
-    ("cracked concrete wall exterior building", "grieta", 60),
-    ("building wall humidity water stain damage", "humedad", 60),
-    ("facade water damage moisture building", "humedad", 60),
-    ("metal corrosion rust building structure", "corrosion", 50),
-    ("corroded iron beam building deterioration", "corrosion", 50),
-    ("building facade wear deterioration old", "desgaste", 50),
-    ("worn exterior wall building paint peeling", "desgaste", 50),
-    ("clean new building facade exterior", "sin_danos", 60),
-    ("modern building wall no damage", "sin_danos", 60),
+    ("rust corrosion metal building structure", "corrosion", 80),
+    ("corroded iron pipe building deterioration", "corrosion", 80),
+    ("rusted metal facade building exterior", "corrosion", 80),
+    ("concrete crack building wall exterior close", "grieta", 80),
+    ("cracked plaster wall building damage", "grieta", 80),
+    ("building paint peeling worn deteriorated facade", "desgaste", 80),
+    ("old building worn exterior deterioration", "desgaste", 80),
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -33,16 +26,16 @@ def descargar(url, ruta):
         pass
     return False
 
-total = 0
 for termino, carpeta, cantidad in busquedas:
-    print(f"\nBuscando: '{termino}'")
+    os.makedirs(carpeta, exist_ok=True)
     existentes = len(os.listdir(carpeta))
+    print(f"\nBuscando: '{termino}'")
     descargadas = 0
     try:
         with DDGS() as ddgs:
             resultados = list(ddgs.images(termino, max_results=cantidad))
         for r in resultados:
-            nombre = f"{existentes + descargadas:04d}.jpg"
+            nombre = f"{existentes + descargadas:04d}_b.jpg"
             ruta = os.path.join(carpeta, nombre)
             if descargar(r["image"], ruta):
                 descargadas += 1
@@ -50,8 +43,8 @@ for termino, carpeta, cantidad in busquedas:
     except Exception as e:
         print(f"  Error: {e}")
     print(f"  Descargadas: {descargadas}")
-    total += descargadas
 
-print(f"\nTotal: {total} imagenes")
-for c in CARPETAS:
-    print(f"  {c}/: {len(os.listdir(c))} imagenes")
+print("\nResumen:")
+for c in ["grieta", "humedad", "corrosion", "desgaste", "sin_danos"]:
+    n = len(os.listdir(c)) if os.path.exists(c) else 0
+    print(f"  {c}/: {n} imagenes")

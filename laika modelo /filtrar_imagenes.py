@@ -3,7 +3,7 @@ import os
 import shutil
 
 SERVIDOR = "http://localhost:3000/analyze"
-CARPETAS_ORIGEN = ["grieta", "humedad", "corrosion", "desgaste", "sin_danos"]
+CARPETAS_ORIGEN = ["grieta", "humedad", "corrosion", "desgaste", "sin_danos", "sin_procesar"]
 DESCARTADAS = "descartadas"
 EXTS = (".jpg", ".jpeg", ".png", ".webp")
 
@@ -64,8 +64,7 @@ for ruta in todas:
         print(f"[{procesadas}/{len(todas)}] {nombre} → {destino} (severidad {sev})")
 
     except Exception as e:
-        print(f"  Error en {nombre}: {e}")
-        shutil.move(ruta, os.path.join(DESCARTADAS, nombre))
+        print(f"  Error en {nombre}: {e} (se deja en su lugar)")
         descartadas += 1
 
 print(f"\nListo.")
