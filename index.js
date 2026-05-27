@@ -17,7 +17,7 @@ const prisma = new PrismaClient();
  
 const pool = new Pool({
     user: "prisma_backend",
-    host: "10.40.5.7",
+    host: "10.40.5.4",
     database: "rescue_dog_db",
     password: "benyi2907",
     port: 5432
@@ -40,7 +40,7 @@ app.use(
 
 /*
 para conectarse al robot, por ahora fake
-
+*/
 app.get("/robot", (req, res) => {
     res.json({
         battery: 82,
@@ -58,7 +58,13 @@ app.post("/move", (req, res) => {
    res.send(`Moviendo robot hacia ${direction}`);
 
 });
+<<<<<<< HEAD
 */
 app.listen(process.env.PORT, () => {
+=======
+
+
+app.listen(3000, () => {
+>>>>>>> e65723fef479757d611ad7ac77a1688aed4d410e
     console.log("Servidor corriendo");
 });
