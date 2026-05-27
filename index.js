@@ -3,6 +3,10 @@ import pg from "pg";
 import pkg from "@prisma/client";
 import express from "express";
 import userRoutes from "./src/routes/userRoutes.js";
+import "dotenv/config";
+
+import robotRoutes
+from "./src/routes/robotRoutes.js";
 
 const { Pool } = pg;
 const { PrismaClient } = pkg;
@@ -10,7 +14,7 @@ const { PrismaClient } = pkg;
 const app = express();
 app.use(cors());
 const prisma = new PrismaClient();
-
+ 
 const pool = new Pool({
     user: "prisma_backend",
     host: "10.40.5.7",
@@ -26,6 +30,13 @@ app.use("/users", userRoutes);
 app.get("/", (req, res) => {
     res.send("LAIKA backend funcionando");
 });
+
+
+app.use(
+    "/robot",
+    robotRoutes
+);
+
 
 /*
 para conectarse al robot, por ahora fake
@@ -48,7 +59,6 @@ app.post("/move", (req, res) => {
 
 });
 */
-
-app.listen(3000, () => {
+app.listen(process.env.PORT, () => {
     console.log("Servidor corriendo");
 });

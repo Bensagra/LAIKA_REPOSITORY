@@ -1,4 +1,5 @@
 import prisma from "../db/prisma.js";
+import bcrypt from "bcrypt";
 
 export const createUser = async (
     gmail,
@@ -6,12 +7,19 @@ export const createUser = async (
     contrasena
 ) => {
 
+
+    const hashedPassword =
+    await bcrypt.hash(
+        contrasena,
+        10
+    );
     const user = await prisma.usuario.create({
         data: {
             gmail,
             username,
-            contrasena_hash: contrasena
-        }
+            contrasena_hash:
+            hashedPassword
+            }
     });
 
     return user;
@@ -31,10 +39,15 @@ export const loginUser = async (
     if (!user) {
         return null;
     }
+    const passwordCorrect =
+    await bcrypt.compare(
+        contrasena,
+        user.contrasena_hash
+    );
 
-    if (user.contrasena_hash !== contrasena) {
-        return null;
-    }
+if (!passwordCorrect) {
+    return null;
+}
 
     return user;
 };

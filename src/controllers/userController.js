@@ -1,4 +1,7 @@
 import { createUser, loginUser } from "../services/userService.js";
+import {
+    generateToken
+} from "../utils/jwt.js";
 
 export const register = async (req, res) => {
 
@@ -11,8 +14,12 @@ export const register = async (req, res) => {
             username,
             contrasena
         );
+        const {
+            contrasena_hash,
+            ...safeUser
+        } = user;
 
-        res.json(user);
+res.json(safeUser);
 
     } catch (error) {
 
@@ -47,11 +54,20 @@ export const login = async (req, res) => {
 
         }
 
-        res.json({
-            message: "Login exitoso",
-            user
-        });
+        const token =
+        generateToken(user);
 
+        const {
+            contrasena_hash,
+            ...safeUser
+        } = user;
+
+        res.json({
+    message: "Login exitoso",
+    token,
+    user: safeUser
+});
+        
     } catch (error) {
 
         console.log(error);
