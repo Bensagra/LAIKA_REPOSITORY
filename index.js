@@ -58,13 +58,8 @@ app.post("/move", (req, res) => {
    res.send(`Moviendo robot hacia ${direction}`);
 
 });
-<<<<<<< HEAD
-*/
+
 app.listen(process.env.PORT, () => {
-=======
 
-
-app.listen(3000, () => {
->>>>>>> e65723fef479757d611ad7ac77a1688aed4d410e
     console.log("Servidor corriendo");
 });
