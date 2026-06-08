@@ -1,0 +1,8 @@
+path: /Users/bensagra/LAIKA-REPOSITORY/LAIKA_REPOSITORY/data/processed/skin_burn
+train: images/train
+val: images/val
+test: images/test
+names:
+  0: first_degree_burn
+  1: second_degree_burn
+  2: third_degree_burn
