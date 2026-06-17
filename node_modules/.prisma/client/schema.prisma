@@ -1,0 +1,112 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model conversacion {
+  id_conversacion   Int       @id @default(autoincrement())
+  log_transcripcion String?
+  ruta_audio        String?   @db.VarChar(500)
+  latitud           Decimal?  @db.Decimal(10, 7)
+  longitud          Decimal?  @db.Decimal(10, 7)
+  hora_registro     DateTime  @db.Timestamp(6)
+  id_mision         Int
+  created_at        DateTime? @default(now()) @db.Timestamp(6)
+  updated_at        DateTime? @default(now()) @db.Timestamp(6)
+  mision            mision    @relation(fields: [id_mision], references: [id_mision], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model edificio {
+  id_edificio        Int       @id @default(autoincrement())
+  nombre_referencia  String?   @db.VarChar(255)
+  ubicacion_lat      Decimal?  @db.Decimal(10, 7)
+  ubicacion_lng      Decimal?  @db.Decimal(10, 7)
+  resultado_analisis String?
+  created_at         DateTime? @default(now()) @db.Timestamp(6)
+  updated_at         DateTime? @default(now()) @db.Timestamp(6)
+  foto               foto[]
+  mision             mision[]
+}
+
+model foto {
+  id_foto      Int       @id @default(autoincrement())
+  ruta_archivo String    @db.VarChar(500)
+  latitud      Decimal?  @db.Decimal(10, 7)
+  longitud     Decimal?  @db.Decimal(10, 7)
+  hora_captura DateTime  @db.Timestamp(6)
+  id_mision    Int
+  id_edificio  Int?
+  created_at   DateTime? @default(now()) @db.Timestamp(6)
+  updated_at   DateTime? @default(now()) @db.Timestamp(6)
+  edificio     edificio? @relation(fields: [id_edificio], references: [id_edificio], onUpdate: NoAction)
+  mision       mision    @relation(fields: [id_mision], references: [id_mision], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model lidar_scan {
+  id_lidar         Int       @id @default(autoincrement())
+  ruta_archivo_pcd String    @db.VarChar(500)
+  latitud          Decimal?  @db.Decimal(10, 7)
+  longitud         Decimal?  @db.Decimal(10, 7)
+  hora_escaneo     DateTime  @db.Timestamp(6)
+  id_mision        Int
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  updated_at       DateTime? @default(now()) @db.Timestamp(6)
+  mision           mision    @relation(fields: [id_mision], references: [id_mision], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model mision {
+  id_mision     Int            @id @default(autoincrement())
+  nombre        String         @db.VarChar(255)
+  descripcion   String?
+  estado_mision String?        @default("en_progreso") @db.VarChar(50)
+  id_usuario    Int
+  id_perro      Int
+  id_edificio   Int?
+  created_at    DateTime?      @default(now()) @db.Timestamp(6)
+  updated_at    DateTime?      @default(now()) @db.Timestamp(6)
+  conversacion  conversacion[]
+  foto          foto[]
+  lidar_scan    lidar_scan[]
+  edificio      edificio?      @relation(fields: [id_edificio], references: [id_edificio], onUpdate: NoAction)
+  perro         perro          @relation(fields: [id_perro], references: [id_perro], onUpdate: NoAction)
+  usuario       usuario        @relation(fields: [id_usuario], references: [id_usuario], onUpdate: NoAction)
+  video         video[]
+}
+
+model perro {
+  id_perro         Int       @id @default(autoincrement())
+  nombre           String    @db.VarChar(100)
+  token_acceso     String    @unique @db.VarChar(255)
+  estado_operativo String?   @default("activo") @db.VarChar(50)
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  updated_at       DateTime? @default(now()) @db.Timestamp(6)
+  mision           mision[]
+}
+
+model usuario {
+  id_usuario      Int       @id @default(autoincrement())
+  gmail           String    @unique @db.VarChar(255)
+  username        String    @db.VarChar(100)
+  contrasena_hash String    @db.VarChar(255)
+  institucion     String?   @db.VarChar(150)
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+  mision          mision[]
+}
+
+model video {
+  id_video          Int       @id @default(autoincrement())
+  ruta_archivo      String    @db.VarChar(500)
+  latitud           Decimal?  @db.Decimal(10, 7)
+  longitud          Decimal?  @db.Decimal(10, 7)
+  hora_inicio       DateTime  @db.Timestamp(6)
+  duracion_segundos Int?
+  id_mision         Int
+  created_at        DateTime? @default(now()) @db.Timestamp(6)
+  updated_at        DateTime? @default(now()) @db.Timestamp(6)
+  mision            mision    @relation(fields: [id_mision], references: [id_mision], onDelete: Cascade, onUpdate: NoAction)
+}
