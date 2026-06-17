@@ -1,0 +1,7 @@
+{
+  "scripts": {
+    "web:noexpo": "npm --prefix MiApp run web:noexpo",
+    "start": "npm --prefix MiApp run web:noexpo"
+  },
+  "private": true
+}

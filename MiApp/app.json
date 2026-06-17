@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "laikAI",
+    "slug": "laikAI",
+    "version": "1.0.0",
+    "orientation": "landscape",
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff"
+      },
+      "softwareKeyboardLayoutMode": "pan"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "requireFullScreen": true
+    }
+  }
+}
+
