@@ -8,12 +8,23 @@
       "adaptiveIcon": {
         "backgroundColor": "#ffffff"
       },
-      "softwareKeyboardLayoutMode": "pan"
+      "softwareKeyboardLayoutMode": "pan",
+      "package": "com.melinakenigsberg.laikAI",
+      "usesCleartextTraffic": true
     },
     "ios": {
       "supportsTablet": true,
-      "requireFullScreen": true
+      "requireFullScreen": true,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f4e76c39-da1f-43db-b200-8b73a2ece850"
+      }
     }
   }
 }
-

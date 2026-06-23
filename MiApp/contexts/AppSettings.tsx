@@ -12,6 +12,8 @@ interface AppSettings {
   setLoggedUser: (v: string | null) => void;
   misionActiva: MisionActiva | null;
   setMisionActiva: (v: MisionActiva | null) => void;
+  robotSpeed: number;          // 0–100
+  setRobotSpeed: (v: number) => void;
 }
 
 const AppSettingsContext = createContext<AppSettings>({
@@ -21,14 +23,22 @@ const AppSettingsContext = createContext<AppSettings>({
   setLoggedUser: () => {},
   misionActiva: null,
   setMisionActiva: () => {},
+  robotSpeed: 50,
+  setRobotSpeed: () => {},
 });
 
 export function AppSettingsProvider({ children }: { children: React.ReactNode }) {
   const [joystickEnabled, setJoystickEnabled] = useState(true);
   const [loggedUser, setLoggedUser] = useState<string | null>(null);
   const [misionActiva, setMisionActiva] = useState<MisionActiva | null>(null);
+  const [robotSpeed, setRobotSpeed] = useState(50);
   return (
-    <AppSettingsContext.Provider value={{ joystickEnabled, setJoystickEnabled, loggedUser, setLoggedUser, misionActiva, setMisionActiva }}>
+    <AppSettingsContext.Provider value={{
+      joystickEnabled, setJoystickEnabled,
+      loggedUser, setLoggedUser,
+      misionActiva, setMisionActiva,
+      robotSpeed, setRobotSpeed,
+    }}>
       {children}
     </AppSettingsContext.Provider>
   );

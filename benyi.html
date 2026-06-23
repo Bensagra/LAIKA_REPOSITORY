@@ -1,0 +1,2617 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Go2 Operator Console</title>
+  <style>
+    :root {
+      --bg: #0f1720;
+      --panel: #182330;
+      --panel-2: #1f2d3d;
+      --text: #e4edf5;
+      --muted: #9ab0c3;
+      --ok: #45d483;
+      --warn: #ffb347;
+      --err: #ff6f6f;
+      --accent: #59a8ff;
+      --border: #2c3f53;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 20% -20%, #20384f 0%, #0f1720 55%, #0d141c 100%);
+      color: var(--text);
+      font-family: "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 16px;
+    }
+
+    .panel {
+      background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+    }
+
+    .title {
+      margin: 0 0 8px;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    input:not([type="checkbox"]), select, button {
+      background: #111b25;
+      border: 1px solid #2f455a;
+      border-radius: 8px;
+      color: var(--text);
+      padding: 8px 10px;
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+      background: #12304b;
+    }
+
+    button:hover { filter: brightness(1.15); }
+
+    .status {
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid #2f455a;
+      background: #112030;
+      color: var(--muted);
+    }
+
+    .status.ok { color: var(--ok); border-color: #285a41; }
+    .status.err { color: var(--err); border-color: #663338; }
+    .status.warn { color: var(--warn); border-color: #73552d; }
+
+    .inline-check.experimental {
+      border-color: #663338;
+      color: var(--err);
+      background: #25151a;
+    }
+
+    .inline-check.experimental input[type="checkbox"] {
+      accent-color: var(--err);
+    }
+
+    .grid2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .media {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16/9;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #0b1118;
+      cursor: zoom-in;
+    }
+
+    .media.map {
+      aspect-ratio: 2/1;
+    }
+
+    .media-shell {
+      position: relative;
+    }
+
+    .media-shell::after {
+      content: "clic para ampliar";
+      position: absolute;
+      right: 8px;
+      bottom: 8px;
+      padding: 4px 7px;
+      border-radius: 6px;
+      background: rgba(4, 10, 16, 0.76);
+      color: #c8d6e2;
+      font-size: 10px;
+      pointer-events: none;
+    }
+
+    .media-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: rgba(3, 8, 13, 0.94);
+      backdrop-filter: blur(5px);
+    }
+
+    .media-modal[hidden] {
+      display: none;
+    }
+
+    .media-modal-content {
+      width: min(96vw, 1800px);
+      max-height: 94vh;
+      display: grid;
+      gap: 10px;
+    }
+
+    .media-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .media-modal canvas {
+      display: block;
+      width: 100%;
+      max-height: calc(94vh - 58px);
+      object-fit: contain;
+      border: 1px solid #45617a;
+      border-radius: 12px;
+      background: #050a0f;
+      cursor: zoom-out;
+    }
+
+    .mono {
+      white-space: pre-wrap;
+      margin: 0;
+      background: #0e1822;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      min-height: 180px;
+      max-height: 320px;
+      overflow: auto;
+      color: #c8d6e2;
+      font-size: 12px;
+    }
+
+    .events {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      max-height: 320px;
+      overflow: auto;
+      display: grid;
+      gap: 8px;
+    }
+
+    .events li {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #101b26;
+      padding: 8px;
+      font-size: 12px;
+      color: #cddbe7;
+    }
+
+    .events .ts {
+      color: var(--muted);
+      font-size: 11px;
+      margin-right: 8px;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 8px;
+    }
+
+    button.primary {
+      background: #2a5f3d !important;
+      border-color: #45d483 !important;
+      color: #45d483 !important;
+      font-weight: bold;
+    }
+
+    button.primary:hover {
+      filter: brightness(1.25) !important;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(90px, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .kbd {
+      color: #8ac2ff;
+      font-weight: 700;
+    }
+
+    .inline-check {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid #2f455a;
+      border-radius: 8px;
+      padding: 6px 10px;
+      background: #0f1b26;
+      font-size: 12px;
+      color: #cddbe7;
+    }
+
+    input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #59a8ff;
+      margin: 0;
+    }
+
+    .range {
+      width: 170px;
+    }
+
+    .small {
+      width: 86px;
+    }
+
+    .saved-map-panel {
+      grid-column: 1 / -1;
+    }
+
+    .map3d-shell {
+      position: relative;
+      margin-top: 10px;
+      min-height: 520px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 40%, rgba(37, 71, 98, 0.35), transparent 55%),
+        #070c12;
+    }
+
+    .map3d-shell.fullscreen {
+      position: fixed;
+      inset: 12px;
+      z-index: 1200;
+      margin: 0;
+      min-height: 0;
+      border-color: #52789a;
+      box-shadow: 0 20px 80px rgba(0, 0, 0, 0.75);
+    }
+
+    .map3d-viewer {
+      display: block;
+      width: 100%;
+      height: 520px;
+      cursor: grab;
+      touch-action: none;
+      outline: none;
+    }
+
+    .map3d-shell.fullscreen .map3d-viewer {
+      height: 100%;
+    }
+
+    .map3d-overlay {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      max-width: calc(100% - 20px);
+      padding: 6px 9px;
+      border-radius: 7px;
+      background: rgba(5, 11, 17, 0.82);
+      color: #b8cad8;
+      font-size: 11px;
+      pointer-events: none;
+    }
+
+    .map-select {
+      min-width: min(480px, 100%);
+      flex: 1 1 320px;
+    }
+
+    @media (max-width: 1080px) {
+      .wrap { grid-template-columns: 1fr; }
+      .grid2 { grid-template-columns: 1fr; }
+      .map3d-viewer { height: 400px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <h2 class="title">Conexion</h2>
+      <div class="row">
+        <label>API</label>
+        <input id="apiBase" value="http://10.40.5.8:8000" style="min-width: 260px">
+        <label>Token</label>
+        <input id="token" value="dev-operator-token" style="min-width: 220px">
+        <label>Robot</label>
+        <input id="robotId" value="go2_01" style="width: 120px">
+        <button id="connectBtn">Conectar</button>
+        <span id="connStatus" class="status">desconectado</span>
+      </div>
+      <p class="hint">
+        Canal operativo: WebSocket + API al servidor. Canal pesado: media recibida desde edge (video/audio/lidar) reenviada por el server.
+      </p>
+
+      <div class="grid2" style="margin-top: 12px;">
+        <div>
+          <h2 class="title">Video</h2>
+          <div class="media-shell">
+            <canvas id="videoFrame" class="media" width="960" height="540" aria-label="video"></canvas>
+          </div>
+        </div>
+        <div>
+          <h2 class="title">Mapa LiDAR 3D · procesado en servidor</h2>
+          <div class="media-shell">
+            <canvas id="lidarFrame" class="media map" width="960" height="480" aria-label="mapa lidar"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="title" style="margin-top: 14px;">Controles</h2>
+      <div class="controls">
+        <button data-cmd="forward">Forward</button>
+        <button data-cmd="left">Left</button>
+        <button data-cmd="right">Right</button>
+        <button data-cmd="back">Back</button>
+        <button data-cmd="strafeL">Strafe L</button>
+        <button data-cmd="strafeR">Strafe R</button>
+        <button data-cmd="stop" style="background:#4a1c24">STOP</button>
+        <button data-cmd="modeManual">Modo Manual</button>
+      </div>
+
+      <div class="row" style="margin-top: 10px;">
+        <label>Velocidad</label>
+        <input id="speedSlider" class="range" type="range" min="0" max="100" value="50" style="width: 200px;">
+        <span id="speedLabel" class="status">50 (Normal)</span>
+        <label class="inline-check experimental">
+          <input id="maxApiToggle" type="checkbox">
+          Máximo API
+        </label>
+        <span id="speedProfileStatus" class="status">perfil normal</span>
+
+        <label>Loop(ms)</label>
+        <input id="loopMs" class="small" type="number" min="50" max="250" value="80">
+      </div>
+
+      <div class="row" style="margin-top: 8px;">
+        <span id="requestedSpeedStatus" class="status">pedido vx 0.00 · vy 0.00 · yaw 0.00</span>
+        <span id="measuredSpeedStatus" class="status">medido vx -- · vy -- · yaw --</span>
+      </div>
+
+      <div class="row" style="margin-top: 8px;">
+        <label class="inline-check"><input id="enableVideo" type="checkbox" checked>Video</label>
+        <label class="inline-check"><input id="enableLidar" type="checkbox" checked>Lidar</label>
+        <label class="inline-check"><input id="enableAudio" type="checkbox">Audio</label>
+
+        <label>Red</label>
+        <select id="networkProfile">
+          <option value="weak" selected>Débil</option>
+          <option value="balanced">Balanceada</option>
+          <option value="quality">Alta calidad</option>
+        </select>
+
+        <label>Cam FPS</label>
+        <input id="cameraFps" class="small" type="number" min="1" max="40" value="12">
+
+        <label>Calidad %</label>
+        <input id="cameraQuality" class="small" type="number" min="25" max="90" value="55">
+
+        <label>Cam ancho</label>
+        <input id="cameraWidth" style="width:100px" type="number" min="320" max="1920" value="640">
+
+        <label>Audio every</label>
+        <input id="audioEmitEvery" class="small" type="number" min="1" max="10" value="2">
+
+        <label>Audio max bytes</label>
+        <input id="audioMaxBytes" style="width:120px" type="number" min="0" max="262144" value="24576">
+
+        <button id="applyMediaBtn" class="primary">✓ Aplicar media</button>
+        <button id="unlockAudioBtn">Activar audio web</button>
+      </div>
+
+      <div class="row" style="margin-top: 8px;">
+        <span id="mediaStatus" class="status">media idle</span>
+        <span id="audioStatus" class="status">audio bloqueado</span>
+      </div>
+      <p class="hint">
+        El perfil <strong>Débil</strong> limita cámara y LiDAR para priorizar el control. El audio queda apagado
+        por defecto porque, aun sin video, puede consumir una porción importante del enlace.
+      </p>
+      <p class="hint">
+        Movimiento continuo: mantené <span class="kbd">2</span> para avanzar y, sin soltarlo, usá
+        <span class="kbd">1/4</span> para girar a la izquierda o <span class="kbd">3/6</span> para girar a la derecha.
+        También funcionan <span class="kbd">WASD o Flechas</span>, <span class="kbd">Q/E</span> lateral,
+        y <span class="kbd">Space</span> stop. El último tramo rojo requiere activar Máximo API.
+      </p>
+    </div>
+
+    <div class="panel">
+      <h2 class="title">Telemetria</h2>
+      <pre id="telemetryBox" class="mono">{}</pre>
+
+      <h2 class="title" style="margin-top: 12px;">Eventos / ACK / Predicciones</h2>
+      <ul id="events" class="events"></ul>
+    </div>
+
+    <div class="panel saved-map-panel">
+      <h2 class="title">Biblioteca de mapas 3D · guardada en el servidor</h2>
+      <div class="row">
+        <select id="savedMapSelect" class="map-select" aria-label="mapas guardados">
+          <option value="">Todavía no se consultaron mapas</option>
+        </select>
+        <button id="refreshMapsBtn" type="button">Actualizar lista</button>
+        <button id="saveMapBtn" type="button" class="primary">Guardar snapshot ahora</button>
+        <button id="loadMapBtn" type="button">Abrir mapa</button>
+        <button id="resetMapViewBtn" type="button">Centrar vista</button>
+        <button id="fullscreenMapBtn" type="button">Pantalla completa</button>
+        <span id="savedMapStatus" class="status">sin mapa cargado</span>
+      </div>
+      <div id="savedMapShell" class="map3d-shell">
+        <canvas id="savedMapCanvas" class="map3d-viewer" tabindex="0" aria-label="visor 3D de mapas guardados"></canvas>
+        <div id="savedMapOverlay" class="map3d-overlay">
+          Arrastrar: rotar · Shift/segundo botón: desplazar · Rueda: zoom
+        </div>
+      </div>
+      <p class="hint">
+        “Mapa actual” se guarda automáticamente mientras llegan puntos. “Guardar snapshot” crea una copia fechada que no cambia.
+        Los mapas se pueden abrir aunque el robot o el WebSocket estén desconectados.
+      </p>
+    </div>
+  </div>
+
+  <div id="mediaModal" class="media-modal" hidden role="dialog" aria-modal="true" aria-label="visor ampliado">
+    <div class="media-modal-content">
+      <div class="media-modal-header">
+        <h2 id="mediaModalTitle" class="title" style="margin:0">Visor ampliado</h2>
+        <button id="closeMediaModal" type="button">Cerrar ×</button>
+      </div>
+      <canvas id="expandedMediaCanvas" width="960" height="540"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const DEFAULT_LIMITS = Object.freeze({
+      max_forward_speed: 3.8,
+      max_reverse_speed: 2.5,
+      max_lateral_speed: 1.0,
+      max_angular_speed: 4.0,
+      default_move_duration_ms: 700,
+    });
+    const DEFAULT_SPEED_PROFILES = Object.freeze({
+      normal: Object.freeze({
+        forward: 3.5,
+        reverse: 2.3,
+        lateral: 0.92,
+        angular: 3.68,
+      }),
+      max_api: Object.freeze({
+        forward: 3.8,
+        reverse: 2.5,
+        lateral: 1.0,
+        angular: 4.0,
+      }),
+    });
+
+    const MOVEMENT_KEYS = new Set([
+      "KeyW", "KeyA", "KeyS", "KeyD",
+      "ArrowUp", "ArrowLeft", "ArrowDown", "ArrowRight",
+      "KeyQ", "KeyE", "KeyZ", "KeyC",
+      "Digit1", "Digit2", "Digit3", "Digit4", "Digit6",
+      "Numpad1", "Numpad2", "Numpad3", "Numpad4", "Numpad6",
+    ]);
+    const FORWARD_KEYS = ["KeyW", "ArrowUp", "Digit2", "Numpad2"];
+    const BACKWARD_KEYS = ["KeyS", "ArrowDown"];
+    const LEFT_KEYS = ["KeyA", "ArrowLeft", "Digit1", "Digit4", "Numpad1", "Numpad4"];
+    const RIGHT_KEYS = ["KeyD", "ArrowRight", "Digit3", "Digit6", "Numpad3", "Numpad6"];
+    const STRAFE_LEFT_KEYS = ["KeyQ", "KeyZ"];
+    const STRAFE_RIGHT_KEYS = ["KeyE", "KeyC"];
+    const NETWORK_PROFILES = Object.freeze({
+      weak: Object.freeze({
+        cameraFps: 12,
+        cameraFormat: "webp",
+        cameraQuality: 55,
+        cameraMinQuality: 34,
+        cameraWidth: 640,
+        lidarHz: 0.7,
+        lidarMaxPoints: 2500,
+        lidarCompression: 6,
+        lidarQuantizationCm: 2.0,
+        uplinkMaxKbps: 2200,
+      }),
+      balanced: Object.freeze({
+        cameraFps: 15,
+        cameraFormat: "webp",
+        cameraQuality: 62,
+        cameraMinQuality: 38,
+        cameraWidth: 960,
+        lidarHz: 2,
+        lidarMaxPoints: 8000,
+        lidarCompression: 5,
+        lidarQuantizationCm: 1.0,
+        uplinkMaxKbps: 5000,
+      }),
+      quality: Object.freeze({
+        cameraFps: 40,
+        cameraFormat: "webp",
+        cameraQuality: 68,
+        cameraMinQuality: 45,
+        cameraWidth: 1280,
+        lidarHz: 5,
+        lidarMaxPoints: 30000,
+        lidarCompression: 3,
+        lidarQuantizationCm: 0.5,
+        uplinkMaxKbps: 12000,
+      }),
+    });
+
+    const state = {
+      ws: null,
+      controlLoop: null,
+      serverHeartbeatLoop: null,
+      mediaStatsLoop: null,
+      reconnectTimer: null,
+      reconnectAttempt: 0,
+      connectGeneration: 0,
+      controlSending: false,
+      stopSending: false,
+      lastMoveActive: false,
+      lastMoveSentAt: 0,
+      lastMoveSignature: "",
+      driveSequence: 0,
+      keyState: new Set(),
+      token: "",
+      apiBase: "",
+      robotId: "go2_01",
+      connected: false,
+      speedValue: 50,
+      serverLimits: { ...DEFAULT_LIMITS },
+      speedProfiles: {
+        normal: { ...DEFAULT_SPEED_PROFILES.normal },
+        max_api: { ...DEFAULT_SPEED_PROFILES.max_api },
+      },
+      speedProfile: "normal",
+      speedProfilePending: null,
+      speedProfileCommandId: "",
+      lastRequestedMove: { x: 0, y: 0, z: 0 },
+      lastMeasuredMove: { x: null, y: null, z: null },
+      lastVideoAt: 0,
+      lastLidarAt: 0,
+      lastAudioAt: 0,
+      mediaRender: {
+        video: {
+          busy: false,
+          pending: null,
+          bitmap: null,
+          generation: 0,
+        },
+        lidar: {
+          busy: false,
+          pending: null,
+          bitmap: null,
+          generation: 0,
+        },
+      },
+      expandedStream: "",
+      videoStats: {
+        frameTimes: [],
+        fps: 0,
+        latencyMs: 0,
+        encodeMs: 0,
+      },
+      lidarStats: {
+        mapPoints: 0,
+        sourcePoints: 0,
+        processingMs: 0,
+      },
+      savedMaps: [],
+      savedMapViewer: {
+        gl: null,
+        program: null,
+        positionBuffer: null,
+        colorBuffer: null,
+        pathPositionBuffer: null,
+        pathColorBuffer: null,
+        pointCount: 0,
+        pathPointCount: 0,
+        yaw: -0.75,
+        pitch: 0.55,
+        distance: 10,
+        radius: 1,
+        target: [0, 0, 0],
+        dragging: false,
+        dragMode: "orbit",
+        lastX: 0,
+        lastY: 0,
+        renderPending: false,
+        metadata: null,
+      },
+      audio: {
+        ctx: null,
+        unlocked: false,
+        processor: null,
+        gain: null,
+        filters: [],
+        queue: [],
+        queueOffset: 0,
+        queuedSamples: 0,
+        packets: 0,
+        dropped: 0,
+        underruns: 0,
+        lastSampleRate: 0,
+        lastChannels: 0,
+        lastDecodeErrorAt: 0,
+      },
+    };
+
+    const els = {
+      apiBase: document.getElementById("apiBase"),
+      token: document.getElementById("token"),
+      robotId: document.getElementById("robotId"),
+      connectBtn: document.getElementById("connectBtn"),
+      connStatus: document.getElementById("connStatus"),
+      telemetryBox: document.getElementById("telemetryBox"),
+      events: document.getElementById("events"),
+      videoFrame: document.getElementById("videoFrame"),
+      lidarFrame: document.getElementById("lidarFrame"),
+      mediaModal: document.getElementById("mediaModal"),
+      mediaModalTitle: document.getElementById("mediaModalTitle"),
+      closeMediaModal: document.getElementById("closeMediaModal"),
+      expandedMediaCanvas: document.getElementById("expandedMediaCanvas"),
+      speedSlider: document.getElementById("speedSlider"),
+      speedLabel: document.getElementById("speedLabel"),
+      maxApiToggle: document.getElementById("maxApiToggle"),
+      speedProfileStatus: document.getElementById("speedProfileStatus"),
+      requestedSpeedStatus: document.getElementById("requestedSpeedStatus"),
+      measuredSpeedStatus: document.getElementById("measuredSpeedStatus"),
+      loopMs: document.getElementById("loopMs"),
+      enableVideo: document.getElementById("enableVideo"),
+      enableLidar: document.getElementById("enableLidar"),
+      enableAudio: document.getElementById("enableAudio"),
+      networkProfile: document.getElementById("networkProfile"),
+      cameraFps: document.getElementById("cameraFps"),
+      cameraQuality: document.getElementById("cameraQuality"),
+      cameraWidth: document.getElementById("cameraWidth"),
+      audioEmitEvery: document.getElementById("audioEmitEvery"),
+      audioMaxBytes: document.getElementById("audioMaxBytes"),
+      applyMediaBtn: document.getElementById("applyMediaBtn"),
+      unlockAudioBtn: document.getElementById("unlockAudioBtn"),
+      mediaStatus: document.getElementById("mediaStatus"),
+      audioStatus: document.getElementById("audioStatus"),
+      savedMapSelect: document.getElementById("savedMapSelect"),
+      refreshMapsBtn: document.getElementById("refreshMapsBtn"),
+      saveMapBtn: document.getElementById("saveMapBtn"),
+      loadMapBtn: document.getElementById("loadMapBtn"),
+      resetMapViewBtn: document.getElementById("resetMapViewBtn"),
+      fullscreenMapBtn: document.getElementById("fullscreenMapBtn"),
+      savedMapStatus: document.getElementById("savedMapStatus"),
+      savedMapShell: document.getElementById("savedMapShell"),
+      savedMapCanvas: document.getElementById("savedMapCanvas"),
+      savedMapOverlay: document.getElementById("savedMapOverlay"),
+    };
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function parseNum(value, fallback = 0) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
+    function setBadge(el, text, mode = "") {
+      el.textContent = text;
+      el.className = "status" + (mode ? ` ${mode}` : "");
+    }
+
+    function setStatus(text, ok = false) {
+      setBadge(els.connStatus, text, ok ? "ok" : "err");
+    }
+
+    function wsUrlFromApi(apiBase, token) {
+      const u = new URL(apiBase);
+      u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+      u.pathname = "/ws/live";
+      u.search = "token=" + encodeURIComponent(token);
+      return u.toString();
+    }
+
+    function api(path) {
+      return state.apiBase.replace(/\/$/, "") + path;
+    }
+
+    function normalizeApiBase(input) {
+      let raw = String(input || "").trim();
+      if (!raw) return "";
+      if (!/^https?:\/\//i.test(raw)) {
+        raw = "http://" + raw;
+      }
+      return raw.replace(/\/$/, "");
+    }
+
+    function normalizeError(err) {
+      if (err instanceof Error) {
+        if (err.message === "Failed to fetch") {
+          return "No se pudo conectar a la API (red/CORS). Verifica URL y server.";
+        }
+        return err.message;
+      }
+      return String(err);
+    }
+
+    async function fetchOrThrow(url, options = {}, timeoutMs = 5000) {
+      let res;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+      try {
+        res = await fetch(url, {
+          ...options,
+          signal: controller.signal,
+        });
+      } catch (err) {
+        if (err && err.name === "AbortError") {
+          throw new Error(`Timeout HTTP después de ${timeoutMs}ms`);
+        }
+        throw new Error(normalizeError(err));
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text || res.statusText || "request failed"}`);
+      }
+
+      return res;
+    }
+
+    async function sendCommand(type, payload = {}, ttl_ms = 1200) {
+      const body = { type, payload, ttl_ms };
+      try {
+        await fetchOrThrow(api(`/api/robots/${state.robotId}/commands`), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + state.token,
+          },
+          body: JSON.stringify(body),
+        }, 2500);
+      } catch (err) {
+        addEvent("http_error", { type, error: normalizeError(err) });
+        throw err;
+      }
+    }
+
+    async function activateControl() {
+      await fetchOrThrow(api(`/api/robots/${state.robotId}/control/activate`), {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + state.token },
+      }, 3000);
+    }
+
+    async function loadCapabilities() {
+      try {
+        const res = await fetchOrThrow(
+          api(`/api/robots/${state.robotId}/capabilities`),
+          {
+            headers: { "Authorization": "Bearer " + state.token },
+          },
+          3000
+        );
+        const json = await res.json();
+        if (json && typeof json === "object" && json.limits) {
+          state.serverLimits = {
+            ...DEFAULT_LIMITS,
+            ...json.limits,
+          };
+          if (json.speed_profiles && typeof json.speed_profiles === "object") {
+            state.speedProfiles = {
+              normal: {
+                ...DEFAULT_SPEED_PROFILES.normal,
+                ...(json.speed_profiles.normal || {}),
+              },
+              max_api: {
+                ...DEFAULT_SPEED_PROFILES.max_api,
+                ...(json.speed_profiles.max_api || {}),
+              },
+            };
+          }
+          if (!state.speedProfilePending && json.active_speed_profile) {
+            applyConfirmedSpeedProfile(String(json.active_speed_profile));
+          }
+          addEvent("capabilities", {
+            role: json.role,
+            limits: state.serverLimits,
+            speed_profiles: state.speedProfiles,
+          });
+          updateSpeedUi();
+        }
+      } catch (err) {
+        addEvent("capabilities_error", normalizeError(err));
+      }
+    }
+
+    function addEvent(type, data) {
+      const li = document.createElement("li");
+      const ts = new Date().toLocaleTimeString();
+      li.innerHTML = `<span class="ts">${ts}</span><strong>${type}</strong><div>${escapeHtml(JSON.stringify(data))}</div>`;
+      els.events.prepend(li);
+
+      while (els.events.children.length > 100) {
+        els.events.removeChild(els.events.lastChild);
+      }
+    }
+
+    function escapeHtml(text) {
+      return String(text)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    function formatImageMime(imageFormat) {
+      const fmt = String(imageFormat || "jpg").toLowerCase();
+      if (fmt === "png") return "image/png";
+      if (fmt === "webp") return "image/webp";
+      return "image/jpeg";
+    }
+
+    function drawBitmap(canvas, bitmap) {
+      if (!canvas || !bitmap) return;
+      if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+      }
+      const ctx = canvas.getContext("2d", {
+        alpha: false,
+        desynchronized: true,
+      });
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    }
+
+    function streamCanvas(stream) {
+      return stream === "video" ? els.videoFrame : els.lidarFrame;
+    }
+
+    async function decodeMediaBlob(blob) {
+      if (typeof createImageBitmap === "function") {
+        return createImageBitmap(blob);
+      }
+
+      const image = new Image();
+      const url = URL.createObjectURL(blob);
+      try {
+        await new Promise((resolve, reject) => {
+          image.onload = resolve;
+          image.onerror = () => reject(new Error("No se pudo decodificar el cuadro"));
+          image.src = url;
+        });
+        return image;
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+
+    async function processMediaFrames(stream) {
+      const renderer = state.mediaRender[stream];
+      if (!renderer || renderer.busy) return;
+      renderer.busy = true;
+
+      try {
+        while (renderer.pending) {
+          const data = renderer.pending;
+          renderer.pending = null;
+          const generation = renderer.generation;
+
+          const bytes = base64ToBytes(data.image_base64);
+          const blob = new Blob([bytes], {
+            type: formatImageMime(data.image_format),
+          });
+          const bitmap = await decodeMediaBlob(blob);
+          if (generation !== renderer.generation) {
+            if (typeof bitmap.close === "function") bitmap.close();
+            continue;
+          }
+
+          drawBitmap(streamCanvas(stream), bitmap);
+          if (state.expandedStream === stream) {
+            drawBitmap(els.expandedMediaCanvas, bitmap);
+          }
+
+          const previous = renderer.bitmap;
+          renderer.bitmap = bitmap;
+          if (previous && typeof previous.close === "function") {
+            previous.close();
+          }
+        }
+      } catch (err) {
+        addEvent("media_decode_error", {
+          stream,
+          error: normalizeError(err),
+        });
+      } finally {
+        renderer.busy = false;
+        if (renderer.pending) {
+          void processMediaFrames(stream);
+        }
+      }
+    }
+
+    function renderMediaImage(data, stream) {
+      if (!data || !data.image_base64 || !state.mediaRender[stream]) return;
+      // Conserva sólo el cuadro más nuevo mientras el navegador decodifica.
+      state.mediaRender[stream].pending = data;
+      void processMediaFrames(stream);
+    }
+
+    function openMediaModal(stream) {
+      const renderer = state.mediaRender[stream];
+      if (!renderer || !renderer.bitmap) return;
+      state.expandedStream = stream;
+      els.mediaModalTitle.textContent = stream === "video"
+        ? "Cámara ampliada"
+        : "Mapa LiDAR 3D ampliado";
+      drawBitmap(els.expandedMediaCanvas, renderer.bitmap);
+      els.mediaModal.hidden = false;
+      document.body.style.overflow = "hidden";
+    }
+
+    function closeMediaModal() {
+      state.expandedStream = "";
+      els.mediaModal.hidden = true;
+      document.body.style.overflow = "";
+    }
+
+    function base64ToBytes(base64) {
+      const bin = atob(base64);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i += 1) {
+        out[i] = bin.charCodeAt(i);
+      }
+      return out;
+    }
+
+    function syncMapApiInputs() {
+      const apiBase = normalizeApiBase(els.apiBase.value);
+      const token = els.token.value.trim();
+      const robotId = els.robotId.value.trim();
+      if (!apiBase || !token || !robotId) {
+        throw new Error("Completá API, token y robot para consultar mapas");
+      }
+      state.apiBase = apiBase;
+      state.token = token;
+      state.robotId = robotId;
+      els.apiBase.value = apiBase;
+    }
+
+    function formatMapDate(timestamp) {
+      const value = Number(timestamp);
+      if (!Number.isFinite(value)) return "fecha desconocida";
+      return new Date(value * 1000).toLocaleString();
+    }
+
+    function formatMapOption(metadata) {
+      const points = Number(metadata.point_count || 0).toLocaleString();
+      if (metadata.is_latest) {
+        return `Mapa actual · ${points} puntos · actualizado ${formatMapDate(metadata.updated_at)}`;
+      }
+      return `${formatMapDate(metadata.created_at)} · ${points} puntos`;
+    }
+
+    async function loadSavedMapList(preferredMapId = "") {
+      try {
+        syncMapApiInputs();
+        setBadge(els.savedMapStatus, "consultando servidor…", "warn");
+        const res = await fetchOrThrow(
+          api(`/api/maps?robot_id=${encodeURIComponent(state.robotId)}`),
+          { headers: { "Authorization": "Bearer " + state.token } },
+          8000
+        );
+        const payload = await res.json();
+        state.savedMaps = Array.isArray(payload.maps) ? payload.maps : [];
+        els.savedMapSelect.replaceChildren();
+
+        if (!state.savedMaps.length) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "No hay mapas guardados para este robot";
+          els.savedMapSelect.appendChild(option);
+          setBadge(els.savedMapStatus, "sin mapas guardados", "warn");
+          return;
+        }
+
+        for (const metadata of state.savedMaps) {
+          const option = document.createElement("option");
+          option.value = String(metadata.map_id || "");
+          option.textContent = formatMapOption(metadata);
+          els.savedMapSelect.appendChild(option);
+        }
+        const target = preferredMapId
+          || (state.savedMapViewer.metadata && state.savedMapViewer.metadata.map_id)
+          || "latest";
+        if ([...els.savedMapSelect.options].some(option => option.value === target)) {
+          els.savedMapSelect.value = target;
+        }
+        setBadge(
+          els.savedMapStatus,
+          `${state.savedMaps.length} mapa${state.savedMaps.length === 1 ? "" : "s"} en servidor`,
+          "ok"
+        );
+      } catch (err) {
+        setBadge(els.savedMapStatus, normalizeError(err), "err");
+        addEvent("maps_list_error", normalizeError(err));
+      }
+    }
+
+    async function saveCurrentMapSnapshot() {
+      try {
+        syncMapApiInputs();
+        setBadge(els.savedMapStatus, "guardando snapshot…", "warn");
+        const res = await fetchOrThrow(
+          api(`/api/robots/${encodeURIComponent(state.robotId)}/maps/snapshot`),
+          {
+            method: "POST",
+            headers: { "Authorization": "Bearer " + state.token },
+          },
+          20000
+        );
+        const payload = await res.json();
+        const metadata = payload.map || {};
+        setBadge(
+          els.savedMapStatus,
+          `snapshot guardado · ${Number(metadata.point_count || 0).toLocaleString()} puntos`,
+          "ok"
+        );
+        addEvent("map_snapshot_saved", metadata);
+        await loadSavedMapList(String(metadata.map_id || ""));
+      } catch (err) {
+        setBadge(els.savedMapStatus, normalizeError(err), "err");
+        addEvent("map_snapshot_error", normalizeError(err));
+      }
+    }
+
+    async function inflateZlib(bytes) {
+      if (typeof DecompressionStream !== "function") {
+        throw new Error("Este navegador no soporta descompresión de mapas");
+      }
+      const stream = new Blob([bytes])
+        .stream()
+        .pipeThrough(new DecompressionStream("deflate"));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+
+    async function decodeFloatPayload(base64, format, components, declaredCount) {
+      let bytes = base64ToBytes(base64 || "");
+      if (String(format || "").endsWith("_zlib")) {
+        bytes = await inflateZlib(bytes);
+      }
+      const expectedBytes = Number(declaredCount || 0) * components * 4;
+      if (bytes.byteLength !== expectedBytes || bytes.byteLength % 4 !== 0) {
+        throw new Error("El archivo del mapa tiene una longitud inválida");
+      }
+      const aligned = bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength
+      );
+      return new Float32Array(aligned);
+    }
+
+    function compileMapShader(gl, type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        const message = gl.getShaderInfoLog(shader) || "shader error";
+        gl.deleteShader(shader);
+        throw new Error(message);
+      }
+      return shader;
+    }
+
+    function initSavedMapViewer() {
+      const viewer = state.savedMapViewer;
+      if (viewer.gl) return viewer.gl;
+      const gl = els.savedMapCanvas.getContext("webgl", {
+        antialias: true,
+        alpha: false,
+        depth: true,
+        powerPreference: "high-performance",
+      });
+      if (!gl) {
+        throw new Error("WebGL no está disponible en este navegador");
+      }
+
+      const vertexShader = compileMapShader(gl, gl.VERTEX_SHADER, `
+        attribute vec3 aPosition;
+        attribute vec3 aColor;
+        uniform mat4 uMvp;
+        uniform float uPointSize;
+        varying vec3 vColor;
+        void main() {
+          gl_Position = uMvp * vec4(aPosition, 1.0);
+          float depth = max(1.0, gl_Position.w);
+          gl_PointSize = clamp(uPointSize / sqrt(depth), 1.5, 9.0);
+          vColor = aColor;
+        }
+      `);
+      const fragmentShader = compileMapShader(gl, gl.FRAGMENT_SHADER, `
+        precision mediump float;
+        varying vec3 vColor;
+        uniform float uRoundPoints;
+        void main() {
+          if (uRoundPoints > 0.5) {
+            vec2 delta = gl_PointCoord - vec2(0.5);
+            if (dot(delta, delta) > 0.25) discard;
+          }
+          gl_FragColor = vec4(vColor, 1.0);
+        }
+      `);
+      const program = gl.createProgram();
+      gl.attachShader(program, vertexShader);
+      gl.attachShader(program, fragmentShader);
+      gl.linkProgram(program);
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        throw new Error(gl.getProgramInfoLog(program) || "No se pudo iniciar el visor 3D");
+      }
+
+      viewer.gl = gl;
+      viewer.program = program;
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+      gl.clearColor(0.025, 0.045, 0.065, 1.0);
+      return gl;
+    }
+
+    function heightColor(t) {
+      const hue = (1 - clamp(t, 0, 1)) * 0.68;
+      const h = hue * 6;
+      const sector = Math.floor(h);
+      const fraction = h - sector;
+      const q = 1 - fraction;
+      const u = fraction;
+      if (sector === 0) return [1, u, 0.08];
+      if (sector === 1) return [q, 1, 0.08];
+      if (sector === 2) return [0.08, 1, u];
+      if (sector === 3) return [0.08, q, 1];
+      if (sector === 4) return [u, 0.08, 1];
+      return [1, 0.08, q];
+    }
+
+    function replaceGlBuffer(gl, previous, data) {
+      if (previous) gl.deleteBuffer(previous);
+      const buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+      return buffer;
+    }
+
+    function uploadSavedMap(points, path, metadata) {
+      const gl = initSavedMapViewer();
+      const viewer = state.savedMapViewer;
+      if (points.length < 3 || points.length % 3 !== 0) {
+        throw new Error("El mapa no contiene puntos 3D válidos");
+      }
+
+      const min = [Infinity, Infinity, Infinity];
+      const max = [-Infinity, -Infinity, -Infinity];
+      for (let i = 0; i < points.length; i += 3) {
+        for (let axis = 0; axis < 3; axis += 1) {
+          const value = points[i + axis];
+          min[axis] = Math.min(min[axis], value);
+          max[axis] = Math.max(max[axis], value);
+        }
+      }
+      const center = [
+        (min[0] + max[0]) / 2,
+        (min[1] + max[1]) / 2,
+        (min[2] + max[2]) / 2,
+      ];
+      const centered = new Float32Array(points.length);
+      const colors = new Float32Array(points.length);
+      const zSpan = Math.max(max[2] - min[2], 0.001);
+      let radiusSq = 0;
+      for (let i = 0; i < points.length; i += 3) {
+        const x = points[i] - center[0];
+        const y = points[i + 1] - center[1];
+        const z = points[i + 2] - center[2];
+        centered[i] = x;
+        centered[i + 1] = y;
+        centered[i + 2] = z;
+        radiusSq = Math.max(radiusSq, x * x + y * y + z * z);
+        const color = heightColor((points[i + 2] - min[2]) / zSpan);
+        colors.set(color, i);
+      }
+
+      const pathPositions = new Float32Array((path.length / 2) * 3);
+      const pathColors = new Float32Array(pathPositions.length);
+      const pathZ = clamp(0, min[2], max[2]) - center[2] + 0.04;
+      for (let source = 0, target = 0; source < path.length; source += 2, target += 3) {
+        pathPositions[target] = path[source] - center[0];
+        pathPositions[target + 1] = path[source + 1] - center[1];
+        pathPositions[target + 2] = pathZ;
+        pathColors[target] = 1.0;
+        pathColors[target + 1] = 0.82;
+        pathColors[target + 2] = 0.18;
+      }
+
+      viewer.positionBuffer = replaceGlBuffer(gl, viewer.positionBuffer, centered);
+      viewer.colorBuffer = replaceGlBuffer(gl, viewer.colorBuffer, colors);
+      viewer.pathPositionBuffer = replaceGlBuffer(gl, viewer.pathPositionBuffer, pathPositions);
+      viewer.pathColorBuffer = replaceGlBuffer(gl, viewer.pathColorBuffer, pathColors);
+      viewer.pointCount = points.length / 3;
+      viewer.pathPointCount = path.length / 2;
+      viewer.radius = Math.max(Math.sqrt(radiusSq), 0.5);
+      viewer.metadata = metadata;
+      resetSavedMapView();
+      els.savedMapOverlay.textContent = [
+        `${viewer.pointCount.toLocaleString()} puntos`,
+        `${viewer.pathPointCount.toLocaleString()} posiciones de trayectoria`,
+        `X ${min[0].toFixed(1)}…${max[0].toFixed(1)} m`,
+        `Y ${min[1].toFixed(1)}…${max[1].toFixed(1)} m`,
+        `Z ${min[2].toFixed(1)}…${max[2].toFixed(1)} m`,
+      ].join(" · ");
+    }
+
+    function mat4Perspective(fovY, aspect, near, far) {
+      const f = 1 / Math.tan(fovY / 2);
+      const out = new Float32Array(16);
+      out[0] = f / aspect;
+      out[5] = f;
+      out[10] = (far + near) / (near - far);
+      out[11] = -1;
+      out[14] = (2 * far * near) / (near - far);
+      return out;
+    }
+
+    function normalizeVec3(value) {
+      const length = Math.hypot(value[0], value[1], value[2]) || 1;
+      return [value[0] / length, value[1] / length, value[2] / length];
+    }
+
+    function crossVec3(a, b) {
+      return [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+      ];
+    }
+
+    function dotVec3(a, b) {
+      return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    }
+
+    function mat4LookAt(eye, target, up) {
+      const z = normalizeVec3([
+        eye[0] - target[0],
+        eye[1] - target[1],
+        eye[2] - target[2],
+      ]);
+      const x = normalizeVec3(crossVec3(up, z));
+      const y = crossVec3(z, x);
+      return new Float32Array([
+        x[0], y[0], z[0], 0,
+        x[1], y[1], z[1], 0,
+        x[2], y[2], z[2], 0,
+        -dotVec3(x, eye), -dotVec3(y, eye), -dotVec3(z, eye), 1,
+      ]);
+    }
+
+    function mat4Multiply(a, b) {
+      const out = new Float32Array(16);
+      for (let column = 0; column < 4; column += 1) {
+        for (let row = 0; row < 4; row += 1) {
+          let value = 0;
+          for (let index = 0; index < 4; index += 1) {
+            value += a[index * 4 + row] * b[column * 4 + index];
+          }
+          out[column * 4 + row] = value;
+        }
+      }
+      return out;
+    }
+
+    function resizeSavedMapCanvas(gl) {
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      const width = Math.max(1, Math.floor(els.savedMapCanvas.clientWidth * ratio));
+      const height = Math.max(1, Math.floor(els.savedMapCanvas.clientHeight * ratio));
+      if (els.savedMapCanvas.width !== width || els.savedMapCanvas.height !== height) {
+        els.savedMapCanvas.width = width;
+        els.savedMapCanvas.height = height;
+      }
+      gl.viewport(0, 0, width, height);
+      return { width, height, ratio };
+    }
+
+    function bindMapAttributes(gl, program, positionBuffer, colorBuffer) {
+      const positionLocation = gl.getAttribLocation(program, "aPosition");
+      const colorLocation = gl.getAttribLocation(program, "aColor");
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      gl.enableVertexAttribArray(positionLocation);
+      gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+      gl.enableVertexAttribArray(colorLocation);
+      gl.vertexAttribPointer(colorLocation, 3, gl.FLOAT, false, 0, 0);
+    }
+
+    function renderSavedMap() {
+      const viewer = state.savedMapViewer;
+      viewer.renderPending = false;
+      if (!viewer.gl || !viewer.program || !viewer.pointCount) return;
+      const gl = viewer.gl;
+      const size = resizeSavedMapCanvas(gl);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.useProgram(viewer.program);
+
+      const horizontal = Math.cos(viewer.pitch) * viewer.distance;
+      const eye = [
+        viewer.target[0] + Math.cos(viewer.yaw) * horizontal,
+        viewer.target[1] + Math.sin(viewer.yaw) * horizontal,
+        viewer.target[2] + Math.sin(viewer.pitch) * viewer.distance,
+      ];
+      const projection = mat4Perspective(
+        Math.PI / 4,
+        size.width / size.height,
+        Math.max(0.02, viewer.radius / 200),
+        Math.max(100, viewer.radius * 20)
+      );
+      const view = mat4LookAt(eye, viewer.target, [0, 0, 1]);
+      const mvp = mat4Multiply(projection, view);
+      gl.uniformMatrix4fv(gl.getUniformLocation(viewer.program, "uMvp"), false, mvp);
+      gl.uniform1f(
+        gl.getUniformLocation(viewer.program, "uPointSize"),
+        Math.max(5, 9 * size.ratio)
+      );
+
+      bindMapAttributes(gl, viewer.program, viewer.positionBuffer, viewer.colorBuffer);
+      gl.uniform1f(gl.getUniformLocation(viewer.program, "uRoundPoints"), 1);
+      gl.drawArrays(gl.POINTS, 0, viewer.pointCount);
+
+      if (viewer.pathPointCount >= 2) {
+        bindMapAttributes(
+          gl,
+          viewer.program,
+          viewer.pathPositionBuffer,
+          viewer.pathColorBuffer
+        );
+        gl.uniform1f(gl.getUniformLocation(viewer.program, "uRoundPoints"), 0);
+        gl.lineWidth(2);
+        gl.drawArrays(gl.LINE_STRIP, 0, viewer.pathPointCount);
+      }
+    }
+
+    function requestSavedMapRender() {
+      const viewer = state.savedMapViewer;
+      if (viewer.renderPending) return;
+      viewer.renderPending = true;
+      requestAnimationFrame(renderSavedMap);
+    }
+
+    function resetSavedMapView() {
+      const viewer = state.savedMapViewer;
+      viewer.yaw = -0.75;
+      viewer.pitch = 0.55;
+      viewer.distance = Math.max(viewer.radius * 2.4, 2);
+      viewer.target = [0, 0, 0];
+      requestSavedMapRender();
+    }
+
+    async function loadSelectedSavedMap() {
+      const mapId = els.savedMapSelect.value;
+      if (!mapId) {
+        setBadge(els.savedMapStatus, "Elegí un mapa guardado", "warn");
+        return;
+      }
+      try {
+        syncMapApiInputs();
+        setBadge(els.savedMapStatus, "descargando mapa 3D…", "warn");
+        const useCompression = typeof DecompressionStream === "function";
+        const res = await fetchOrThrow(
+          api(
+            `/api/maps/${encodeURIComponent(state.robotId)}/${encodeURIComponent(mapId)}`
+            + `?compressed=${useCompression ? "true" : "false"}`
+          ),
+          { headers: { "Authorization": "Bearer " + state.token } },
+          30000
+        );
+        const payload = await res.json();
+        const points = await decodeFloatPayload(
+          payload.points_base64,
+          payload.point_format,
+          3,
+          payload.point_count
+        );
+        const path = await decodeFloatPayload(
+          payload.path_base64,
+          payload.path_format,
+          2,
+          payload.path_point_count
+        );
+        uploadSavedMap(points, path, payload.metadata || {});
+        setBadge(
+          els.savedMapStatus,
+          `${mapId === "latest" ? "mapa actual" : "snapshot"} abierto`,
+          "ok"
+        );
+      } catch (err) {
+        setBadge(els.savedMapStatus, normalizeError(err), "err");
+        addEvent("map_load_error", normalizeError(err));
+      }
+    }
+
+    function toggleSavedMapFullscreen() {
+      const enabled = !els.savedMapShell.classList.contains("fullscreen");
+      els.savedMapShell.classList.toggle("fullscreen", enabled);
+      els.fullscreenMapBtn.textContent = enabled ? "Salir de pantalla completa" : "Pantalla completa";
+      document.body.style.overflow = enabled ? "hidden" : "";
+      requestSavedMapRender();
+    }
+
+    function setupSavedMapInteraction() {
+      const canvas = els.savedMapCanvas;
+      canvas.addEventListener("contextmenu", event => event.preventDefault());
+      canvas.addEventListener("pointerdown", event => {
+        const viewer = state.savedMapViewer;
+        viewer.dragging = true;
+        viewer.dragMode = event.button === 2 || event.shiftKey ? "pan" : "orbit";
+        viewer.lastX = event.clientX;
+        viewer.lastY = event.clientY;
+        canvas.setPointerCapture(event.pointerId);
+        canvas.style.cursor = "grabbing";
+      });
+      canvas.addEventListener("pointermove", event => {
+        const viewer = state.savedMapViewer;
+        if (!viewer.dragging) return;
+        const dx = event.clientX - viewer.lastX;
+        const dy = event.clientY - viewer.lastY;
+        viewer.lastX = event.clientX;
+        viewer.lastY = event.clientY;
+        if (viewer.dragMode === "orbit") {
+          viewer.yaw -= dx * 0.008;
+          viewer.pitch = clamp(viewer.pitch - dy * 0.008, -1.42, 1.42);
+        } else {
+          const scale = viewer.distance * 0.0018;
+          const right = [-Math.sin(viewer.yaw), Math.cos(viewer.yaw), 0];
+          const up = [
+            -Math.cos(viewer.yaw) * Math.sin(viewer.pitch),
+            -Math.sin(viewer.yaw) * Math.sin(viewer.pitch),
+            Math.cos(viewer.pitch),
+          ];
+          for (let axis = 0; axis < 3; axis += 1) {
+            viewer.target[axis] += (-dx * right[axis] + dy * up[axis]) * scale;
+          }
+        }
+        requestSavedMapRender();
+      });
+      const finishDrag = event => {
+        const viewer = state.savedMapViewer;
+        viewer.dragging = false;
+        canvas.style.cursor = "grab";
+        if (canvas.hasPointerCapture(event.pointerId)) {
+          canvas.releasePointerCapture(event.pointerId);
+        }
+      };
+      canvas.addEventListener("pointerup", finishDrag);
+      canvas.addEventListener("pointercancel", finishDrag);
+      canvas.addEventListener("wheel", event => {
+        event.preventDefault();
+        const viewer = state.savedMapViewer;
+        viewer.distance = clamp(
+          viewer.distance * Math.exp(event.deltaY * 0.001),
+          Math.max(viewer.radius * 0.08, 0.15),
+          Math.max(viewer.radius * 30, 30)
+        );
+        requestSavedMapRender();
+      }, { passive: false });
+      canvas.addEventListener("keydown", event => {
+        if (event.code === "KeyR") {
+          event.preventDefault();
+          resetSavedMapView();
+        }
+      });
+      if (typeof ResizeObserver === "function") {
+        new ResizeObserver(requestSavedMapRender).observe(els.savedMapShell);
+      } else {
+        window.addEventListener("resize", requestSavedMapRender);
+      }
+    }
+
+    function setupAudioPipeline() {
+      const audio = state.audio;
+      if (!audio.ctx || audio.processor) return;
+
+      const bufferSize = 2048;
+      audio.processor = audio.ctx.createScriptProcessor(bufferSize, 0, 1);
+      audio.gain = audio.ctx.createGain();
+      audio.gain.gain.value = 1.0;
+      audio.filters = [
+        audio.ctx.createBiquadFilter(),
+        audio.ctx.createBiquadFilter(),
+        audio.ctx.createBiquadFilter(),
+      ];
+
+      audio.filters[0].type = "highpass";
+      audio.filters[0].frequency.value = 80;
+      audio.filters[0].Q.value = 0.707;
+
+      audio.filters[1].type = "notch";
+      audio.filters[1].frequency.value = 120;
+      audio.filters[1].Q.value = 25;
+
+      audio.filters[2].type = "notch";
+      audio.filters[2].frequency.value = 240;
+      audio.filters[2].Q.value = 25;
+
+      audio.processor.onaudioprocess = (event) => {
+        const output = event.outputBuffer.getChannelData(0);
+        let written = 0;
+
+        while (written < output.length && audio.queue.length > 0) {
+          const chunk = audio.queue[0];
+          const available = chunk.length - audio.queueOffset;
+          const needed = output.length - written;
+          const count = Math.min(available, needed);
+
+          output.set(
+            chunk.subarray(audio.queueOffset, audio.queueOffset + count),
+            written
+          );
+
+          written += count;
+          audio.queueOffset += count;
+          audio.queuedSamples -= count;
+
+          if (audio.queueOffset >= chunk.length) {
+            audio.queue.shift();
+            audio.queueOffset = 0;
+          }
+        }
+
+        if (written < output.length) {
+          output.fill(0, written);
+          audio.underruns += 1;
+        }
+      };
+
+      audio.processor.connect(audio.filters[0]);
+      audio.filters[0].connect(audio.filters[1]);
+      audio.filters[1].connect(audio.filters[2]);
+      audio.filters[2].connect(audio.gain);
+      audio.gain.connect(audio.ctx.destination);
+    }
+
+    function resetAudioQueue() {
+      state.audio.queue.length = 0;
+      state.audio.queueOffset = 0;
+      state.audio.queuedSamples = 0;
+    }
+
+    function releaseMediaFrames() {
+      closeMediaModal();
+      for (const renderer of Object.values(state.mediaRender)) {
+        renderer.generation += 1;
+        renderer.pending = null;
+        if (renderer.bitmap && typeof renderer.bitmap.close === "function") {
+          renderer.bitmap.close();
+        }
+        renderer.bitmap = null;
+      }
+    }
+
+    function resampleMono(samples, sourceRate, targetRate) {
+      if (sourceRate === targetRate || samples.length === 0) return samples;
+
+      const outputLength = Math.max(1, Math.round(samples.length * targetRate / sourceRate));
+      const output = new Float32Array(outputLength);
+      const scale = sourceRate / targetRate;
+
+      for (let i = 0; i < outputLength; i += 1) {
+        const position = i * scale;
+        const left = Math.floor(position);
+        const right = Math.min(left + 1, samples.length - 1);
+        const fraction = position - left;
+        output[i] = samples[left] + (samples[right] - samples[left]) * fraction;
+      }
+
+      return output;
+    }
+
+    async function ensureAudioContext(userGesture = false) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) {
+        addEvent("audio_error", "AudioContext no soportado por este navegador");
+        return false;
+      }
+
+      if (!state.audio.ctx) {
+        state.audio.ctx = new Ctx({
+          latencyHint: "interactive",
+          sampleRate: 48000,
+        });
+        setupAudioPipeline();
+      }
+
+      if (state.audio.ctx.state !== "running") {
+        if (!userGesture && !state.audio.unlocked) {
+          updateMediaStatus();
+          return false;
+        }
+        try {
+          await state.audio.ctx.resume();
+        } catch (err) {
+          addEvent("audio_resume_error", normalizeError(err));
+          updateMediaStatus();
+          return false;
+        }
+      }
+
+      state.audio.unlocked = state.audio.ctx.state === "running";
+      updateMediaStatus();
+      return state.audio.unlocked;
+    }
+
+    function queueAudioPacket(data) {
+      if (!data || !data.audio_base64) return;
+      state.lastAudioAt = Date.now();
+
+      if (!state.audio.ctx || !state.audio.unlocked) {
+        state.audio.dropped += 1;
+        return;
+      }
+
+      try {
+        const channels = clamp(Math.round(parseNum(data.channels, 1)), 1, 2);
+        const sampleRateRaw = Math.round(parseNum(data.sample_rate, 0));
+        const sampleRate = sampleRateRaw >= 3000 ? sampleRateRaw : 48000;
+
+        const bytes = base64ToBytes(data.audio_base64);
+        const bytesPerFrame = channels * 2;
+        const frameCount = Math.floor(bytes.byteLength / bytesPerFrame);
+        if (frameCount <= 0) return;
+
+        const view = new DataView(bytes.buffer, bytes.byteOffset, frameCount * bytesPerFrame);
+        const mono = new Float32Array(frameCount);
+
+        for (let i = 0; i < frameCount; i += 1) {
+          let sum = 0;
+          for (let ch = 0; ch < channels; ch += 1) {
+            sum += view.getInt16((i * channels + ch) * 2, true) / 32768;
+          }
+          mono[i] = sum / channels;
+        }
+
+        const output = resampleMono(mono, sampleRate, state.audio.ctx.sampleRate);
+        const maxQueued = Math.round(state.audio.ctx.sampleRate * 0.35);
+
+        while (
+          state.audio.queue.length > 0
+          && state.audio.queuedSamples + output.length > maxQueued
+        ) {
+          const removed = state.audio.queue.shift();
+          state.audio.queuedSamples -= removed.length - state.audio.queueOffset;
+          state.audio.queueOffset = 0;
+          state.audio.dropped += 1;
+        }
+
+        state.audio.queue.push(output);
+        state.audio.queuedSamples += output.length;
+        state.audio.packets += 1;
+        state.audio.lastSampleRate = sampleRate;
+        state.audio.lastChannels = channels;
+      } catch (err) {
+        state.audio.dropped += 1;
+        const now = Date.now();
+        if (now - state.audio.lastDecodeErrorAt > 1500) {
+          state.audio.lastDecodeErrorAt = now;
+          addEvent("audio_decode_error", normalizeError(err));
+        }
+      }
+    }
+
+    function applyConfirmedSpeedProfile(profile) {
+      const normalized = profile === "max_api" ? "max_api" : "normal";
+      state.speedProfile = normalized;
+      state.speedProfilePending = null;
+      state.speedProfileCommandId = "";
+      els.maxApiToggle.checked = normalized === "max_api";
+      els.maxApiToggle.disabled = !state.connected;
+      setBadge(
+        els.speedProfileStatus,
+        normalized === "max_api" ? "MÁXIMO API activo" : "perfil normal",
+        normalized === "max_api" ? "err" : "ok"
+      );
+      updateSpeedUi();
+    }
+
+    function updateMotionReadouts() {
+      const requested = state.lastRequestedMove;
+      const measured = state.lastMeasuredMove;
+      setBadge(
+        els.requestedSpeedStatus,
+        `pedido vx ${requested.x.toFixed(2)} · vy ${requested.y.toFixed(2)} · yaw ${requested.z.toFixed(2)}`,
+        state.speedProfile === "max_api" ? "warn" : ""
+      );
+
+      const fmt = value => Number.isFinite(value) ? Number(value).toFixed(2) : "--";
+      setBadge(
+        els.measuredSpeedStatus,
+        `medido vx ${fmt(measured.x)} · vy ${fmt(measured.y)} · yaw ${fmt(measured.z)}`,
+        ""
+      );
+    }
+
+    function updateMeasuredMotion(telemetry) {
+      const velocity = telemetry && typeof telemetry.velocity === "object"
+        ? telemetry.velocity
+        : {};
+      state.lastMeasuredMove = {
+        x: parseNum(velocity.x ?? velocity.linear, NaN),
+        y: parseNum(velocity.y, NaN),
+        z: parseNum(velocity.z ?? velocity.angular, NaN),
+      };
+
+      const speedControl = telemetry && typeof telemetry.speed_control === "object"
+        ? telemetry.speed_control
+        : {};
+      if (
+        !state.speedProfilePending
+        && (speedControl.profile === "normal" || speedControl.profile === "max_api")
+        && speedControl.profile !== state.speedProfile
+      ) {
+        applyConfirmedSpeedProfile(speedControl.profile);
+      }
+      updateMotionReadouts();
+    }
+
+    function handleSpeedProfileAck(data) {
+      if (!data || data.command_type !== "set_speed_profile") return false;
+      if (
+        state.speedProfileCommandId
+        && data.command_id
+        && data.command_id !== state.speedProfileCommandId
+      ) {
+        return true;
+      }
+
+      if (data.status === "accepted") {
+        setBadge(
+          els.speedProfileStatus,
+          `activando ${state.speedProfilePending || "perfil"}...`,
+          "warn"
+        );
+        return true;
+      }
+
+      if (data.status === "executed") {
+        const result = data.result && typeof data.result === "object" ? data.result : {};
+        applyConfirmedSpeedProfile(result.profile || state.speedProfilePending || "normal");
+        addEvent("speed_profile_active", result);
+        return true;
+      }
+
+      if (data.status === "error" || data.status === "rejected") {
+        const previous = state.speedProfile;
+        state.speedProfilePending = null;
+        state.speedProfileCommandId = "";
+        els.maxApiToggle.checked = previous === "max_api";
+        els.maxApiToggle.disabled = !state.connected;
+        setBadge(
+          els.speedProfileStatus,
+          `perfil rechazado: ${data.reason || data.status}`,
+          "err"
+        );
+        addEvent("speed_profile_error", data);
+        return true;
+      }
+
+      return true;
+    }
+
+    function handleWsMessage(msg) {
+      const type = msg.type;
+
+      if (type === "telemetry") {
+        if (msg.robot_id !== state.robotId) return;
+        const telemetry = msg.data || {};
+        els.telemetryBox.textContent = JSON.stringify(telemetry, null, 2);
+        updateMeasuredMotion(telemetry);
+        return;
+      }
+
+      if (type === "speed_profile_status") {
+        if (msg.robot_id !== state.robotId) return;
+        if (!msg.ok) {
+          state.speedProfilePending = null;
+          state.speedProfileCommandId = "";
+          els.maxApiToggle.checked = state.speedProfile === "max_api";
+          els.maxApiToggle.disabled = !state.connected;
+          setBadge(
+            els.speedProfileStatus,
+            msg.error || "no se pudo solicitar el perfil",
+            "err"
+          );
+          return;
+        }
+        state.speedProfileCommandId = String(msg.command_id || "");
+        setBadge(
+          els.speedProfileStatus,
+          `activando ${msg.profile}...`,
+          "warn"
+        );
+        return;
+      }
+
+      if (type === "media") {
+        if (msg.robot_id !== state.robotId) return;
+        const stream = String(msg.stream || "");
+        const data = msg.data || {};
+
+        if (stream === "video") {
+          const now = Date.now();
+          renderMediaImage(data, "video");
+          state.lastVideoAt = now;
+          state.videoStats.frameTimes.push(now);
+          while (
+            state.videoStats.frameTimes.length > 0
+            && state.videoStats.frameTimes[0] < now - 1000
+          ) {
+            state.videoStats.frameTimes.shift();
+          }
+          state.videoStats.fps = state.videoStats.frameTimes.length;
+          state.videoStats.encodeMs = parseNum(data.encode_ms, 0);
+          const encodedTs = parseNum(data.encoded_ts, 0);
+          state.videoStats.latencyMs = encodedTs > 0
+            ? Math.max(0, now - encodedTs * 1000)
+            : 0;
+          return;
+        }
+
+        if (stream === "lidar") {
+          renderMediaImage(data, "lidar");
+          state.lastLidarAt = Date.now();
+          state.lidarStats.mapPoints = Math.round(parseNum(data.map_point_count, 0));
+          state.lidarStats.sourcePoints = Math.round(parseNum(data.source_point_count, 0));
+          state.lidarStats.processingMs = parseNum(data.processing_ms, 0);
+          return;
+        }
+
+        if (stream === "audio") {
+          queueAudioPacket(data);
+          return;
+        }
+
+        return;
+      }
+
+      if (type === "command_ack" && handleSpeedProfileAck(msg.data || {})) {
+        return;
+      }
+
+      if (type === "event" || type === "prediction" || type === "command_ack" || type === "command_out") {
+        addEvent(type, msg.data || msg);
+      }
+    }
+
+    function currentPreset() {
+      const speedVal = clamp(parseNum(state.speedValue, 50), 0, 100);
+      const scale = speedVal / 100;
+      const profile = state.speedProfiles[state.speedProfile]
+        || state.speedProfiles.normal
+        || DEFAULT_SPEED_PROFILES.normal;
+
+      return {
+        forward: parseNum(profile.forward, DEFAULT_SPEED_PROFILES.normal.forward) * scale,
+        reverse: parseNum(profile.reverse, DEFAULT_SPEED_PROFILES.normal.reverse) * scale,
+        lateral: parseNum(profile.lateral, DEFAULT_SPEED_PROFILES.normal.lateral) * scale,
+        angular: parseNum(profile.angular, DEFAULT_SPEED_PROFILES.normal.angular) * scale,
+      };
+    }
+
+    function currentMoveFromKeys() {
+      const speed = currentPreset();
+
+      let x = 0;
+      let y = 0;
+      let z = 0;
+
+      if (FORWARD_KEYS.some(code => state.keyState.has(code))) x += speed.forward;
+      if (BACKWARD_KEYS.some(code => state.keyState.has(code))) x -= speed.reverse;
+      if (LEFT_KEYS.some(code => state.keyState.has(code))) z += speed.angular;
+      if (RIGHT_KEYS.some(code => state.keyState.has(code))) z -= speed.angular;
+      if (STRAFE_LEFT_KEYS.some(code => state.keyState.has(code))) y += speed.lateral;
+      if (STRAFE_RIGHT_KEYS.some(code => state.keyState.has(code))) y -= speed.lateral;
+
+      return { x, y, z };
+    }
+
+    function parseLoopMs() {
+      const parsed = Math.round(parseNum(els.loopMs.value, 80));
+      const loopMs = clamp(parsed, 50, 250);
+      els.loopMs.value = String(loopMs);
+      return loopMs;
+    }
+
+    function updateSpeedUi() {
+      state.speedValue = Math.max(0, Math.min(100, parseNum(els.speedSlider.value, 50)));
+      els.speedSlider.value = state.speedValue;
+      const preset = currentPreset();
+
+      let label = "Lento";
+      if (state.speedProfile === "max_api" && preset.forward > 3.5) label = "MÁXIMO API";
+      else if (state.speedValue >= 75) label = "Rápido";
+      else if (state.speedValue >= 50) label = "Normal";
+      else if (state.speedValue >= 25) label = "Medio-Lento";
+
+      els.speedLabel.textContent = `${state.speedValue}% · ${preset.forward.toFixed(2)} m/s (${label})`;
+
+      if (state.speedProfile === "max_api") {
+        const threshold = clamp(3.5 / state.speedProfiles.max_api.forward * 100, 0, 100);
+        els.speedSlider.style.background = (
+          `linear-gradient(90deg, #24577d 0%, #24577d ${threshold}%, `
+          + `#7d2630 ${threshold}%, #7d2630 100%)`
+        );
+        els.speedSlider.style.accentColor = preset.forward > 3.5 ? "#ff6f6f" : "#59a8ff";
+      } else {
+        els.speedSlider.style.background = "";
+        els.speedSlider.style.accentColor = "#59a8ff";
+      }
+
+      updateMotionReadouts();
+    }
+
+    function ageText(tsMs) {
+      if (!tsMs) return "--";
+      return `${((Date.now() - tsMs) / 1000).toFixed(1)}s`;
+    }
+
+    function updateMediaStatus() {
+      if (!state.connected) {
+        setBadge(els.mediaStatus, "media offline", "err");
+      } else {
+        const vAge = state.lastVideoAt ? Date.now() - state.lastVideoAt : Number.POSITIVE_INFINITY;
+        const lAge = state.lastLidarAt ? Date.now() - state.lastLidarAt : Number.POSITIVE_INFINITY;
+        const aAge = state.lastAudioAt ? Date.now() - state.lastAudioAt : Number.POSITIVE_INFINITY;
+
+        const staleVideo = els.enableVideo.checked && vAge > 3000;
+        const staleLidar = els.enableLidar.checked && lAge > 3500;
+        const staleAudio = els.enableAudio.checked && aAge > 3000;
+        const stale = staleVideo || staleLidar || staleAudio;
+
+        setBadge(
+          els.mediaStatus,
+          (
+            `CAM ${state.videoStats.fps}fps ${state.videoStats.latencyMs.toFixed(0)}ms `
+            + `(enc ${state.videoStats.encodeMs.toFixed(0)}ms) | `
+            + `MAP ${state.lidarStats.mapPoints} vox ${state.lidarStats.processingMs.toFixed(0)}ms | `
+            + `A ${ageText(state.lastAudioAt)}`
+          ),
+          stale ? "err" : "ok"
+        );
+      }
+
+      if (!state.audio.unlocked) {
+        setBadge(els.audioStatus, "audio bloqueado (click Activar audio web)", "err");
+        return;
+      }
+
+      setBadge(
+        els.audioStatus,
+        `audio ${state.audio.lastSampleRate || "--"}Hz ${state.audio.lastChannels || "--"}ch pkt:${state.audio.packets} drop:${state.audio.dropped} under:${state.audio.underruns}`,
+        "ok"
+      );
+    }
+
+    function selectedNetworkProfile() {
+      return NETWORK_PROFILES[els.networkProfile.value] || NETWORK_PROFILES.weak;
+    }
+
+    function applyNetworkProfileValues() {
+      const profile = selectedNetworkProfile();
+      els.cameraFps.value = String(profile.cameraFps);
+      els.cameraQuality.value = String(profile.cameraQuality);
+      els.cameraWidth.value = String(profile.cameraWidth);
+      return profile;
+    }
+
+    async function applyMediaSettings() {
+      if (!state.connected) {
+        addEvent("media_config", "Conectate antes de aplicar media");
+        return;
+      }
+
+      const audioEmitEvery = Math.max(1, Math.min(10, Math.round(parseNum(els.audioEmitEvery.value, 2))));
+      const audioMaxBytes = Math.max(0, Math.round(parseNum(els.audioMaxBytes.value, 24576)));
+      const profile = selectedNetworkProfile();
+      const cameraFps = clamp(Math.round(parseNum(els.cameraFps.value, profile.cameraFps)), 1, 40);
+      const cameraQuality = clamp(Math.round(parseNum(els.cameraQuality.value, profile.cameraQuality)), 25, 90);
+      const cameraWidth = clamp(Math.round(parseNum(els.cameraWidth.value, profile.cameraWidth)), 320, 1920);
+
+      els.audioEmitEvery.value = String(audioEmitEvery);
+      els.audioMaxBytes.value = String(audioMaxBytes);
+      els.cameraFps.value = String(cameraFps);
+      els.cameraQuality.value = String(cameraQuality);
+      els.cameraWidth.value = String(cameraWidth);
+
+      if (els.enableAudio.checked) {
+        await ensureAudioContext(false);
+      } else {
+        resetAudioQueue();
+      }
+
+      const commands = [
+        {
+          type: "set_camera_stream",
+          payload: {
+            enabled: !!els.enableVideo.checked,
+            emit_every: 1,
+            format: profile.cameraFormat,
+            jpeg_quality: cameraQuality,
+            min_quality: profile.cameraMinQuality,
+            target_fps: cameraFps,
+            max_width: cameraWidth,
+            uplink_max_kbps: profile.uplinkMaxKbps,
+          },
+        },
+        {
+          type: "set_lidar_decoder",
+          payload: {
+            decoder: "native",
+          },
+        },
+        {
+          type: "set_lidar",
+          payload: {
+            enabled: !!els.enableLidar.checked,
+            subscribe: true,
+            media_hz: profile.lidarHz,
+            max_points: profile.lidarMaxPoints,
+            compression_level: profile.lidarCompression,
+            quantization_cm: profile.lidarQuantizationCm,
+          },
+        },
+        {
+          type: "set_audio",
+          payload: {
+            enabled: !!els.enableAudio.checked,
+            emit_every: audioEmitEvery,
+            max_bytes: audioMaxBytes,
+          },
+        },
+      ];
+
+      for (const cmd of commands) {
+        try {
+          await sendCommand(cmd.type, cmd.payload, 2000);
+          addEvent(`media_${cmd.type}_ok`, cmd.payload);
+        } catch (err) {
+          addEvent("media_config_error", { cmd: cmd.type, error: normalizeError(err) });
+        }
+      }
+
+      addEvent("media_config_applied", {
+        video: !!els.enableVideo.checked,
+        network_profile: els.networkProfile.value,
+        camera_format: profile.cameraFormat,
+        camera_fps: cameraFps,
+        camera_quality: cameraQuality,
+        camera_width: cameraWidth,
+        uplink_max_kbps: profile.uplinkMaxKbps,
+        lidar: !!els.enableLidar.checked,
+        lidar_hz: profile.lidarHz,
+        lidar_max_points: profile.lidarMaxPoints,
+        audio: !!els.enableAudio.checked,
+        audio_emit_every: audioEmitEvery,
+        audio_max_bytes: audioMaxBytes,
+      });
+      updateMediaStatus();
+    }
+
+    function sendDriveState(force = false) {
+      if (!state.connected || !state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        return false;
+      }
+
+      const m = currentMoveFromKeys();
+      const active = Math.abs(m.x) > 0 || Math.abs(m.y) > 0 || Math.abs(m.z) > 0;
+
+      if (!active) {
+        if (!state.lastMoveActive && !force) return true;
+
+        state.ws.send(JSON.stringify({
+          op: "drive_stop",
+          robot_id: state.robotId,
+          sequence: ++state.driveSequence,
+        }));
+        state.lastMoveActive = false;
+        state.lastMoveSignature = "";
+        state.lastMoveSentAt = Date.now();
+        state.lastRequestedMove = { x: 0, y: 0, z: 0 };
+        updateMotionReadouts();
+        return true;
+      }
+
+      const signature = `${m.x.toFixed(3)}:${m.y.toFixed(3)}:${m.z.toFixed(3)}`;
+      const now = Date.now();
+      const changed = signature !== state.lastMoveSignature;
+      if (!force && !changed && now - state.lastMoveSentAt < parseLoopMs() - 5) {
+        return true;
+      }
+
+      if (state.ws.bufferedAmount > 64 * 1024) {
+        return false;
+      }
+
+      const loopMs = parseLoopMs();
+      state.ws.send(JSON.stringify({
+        op: "drive",
+        robot_id: state.robotId,
+        sequence: ++state.driveSequence,
+        payload: {
+          linear_x: m.x,
+          lateral_y: m.y,
+          angular_z: m.z,
+          duration_ms: Math.max(260, loopMs * 4),
+        },
+      }));
+      state.lastMoveActive = true;
+      state.lastMoveSignature = signature;
+      state.lastMoveSentAt = now;
+      state.lastRequestedMove = { x: m.x, y: m.y, z: m.z };
+      updateMotionReadouts();
+      return true;
+    }
+
+    function startControlLoop() {
+      stopControlLoop();
+      const loopMs = parseLoopMs();
+
+      state.controlLoop = setInterval(() => {
+        sendDriveState(false);
+      }, loopMs);
+
+      state.serverHeartbeatLoop = setInterval(() => {
+        if (!state.connected || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+        state.ws.send(JSON.stringify({ op: "heartbeat", robot_id: state.robotId }));
+      }, 500);
+
+      state.mediaStatsLoop = setInterval(updateMediaStatus, 500);
+      updateMediaStatus();
+    }
+
+    function stopControlLoop() {
+      if (state.controlLoop) {
+        clearInterval(state.controlLoop);
+        state.controlLoop = null;
+      }
+      if (state.serverHeartbeatLoop) {
+        clearInterval(state.serverHeartbeatLoop);
+        state.serverHeartbeatLoop = null;
+      }
+      if (state.mediaStatsLoop) {
+        clearInterval(state.mediaStatsLoop);
+        state.mediaStatsLoop = null;
+      }
+      state.lastMoveActive = false;
+      state.lastMoveSignature = "";
+      state.lastMoveSentAt = 0;
+      state.lastRequestedMove = { x: 0, y: 0, z: 0 };
+      updateMotionReadouts();
+      state.controlSending = false;
+      state.stopSending = false;
+    }
+
+    async function stopRobotNow() {
+      if (!state.connected || state.stopSending) return;
+
+      state.stopSending = true;
+      state.lastMoveActive = false;
+      state.lastMoveSignature = "";
+      state.lastMoveSentAt = 0;
+
+      try {
+        if (
+          state.ws
+          && state.ws.readyState === WebSocket.OPEN
+          && state.ws.bufferedAmount <= 64 * 1024
+        ) {
+          state.ws.send(JSON.stringify({
+            op: "drive_stop",
+            robot_id: state.robotId,
+            sequence: ++state.driveSequence,
+          }));
+        } else {
+          await sendCommand("stop", {}, 900);
+        }
+      } catch (err) {
+        // Error already recorded in events.
+      } finally {
+        state.stopSending = false;
+      }
+    }
+
+    async function requestSpeedProfile(profile) {
+      const normalized = profile === "max_api" ? "max_api" : "normal";
+      if (
+        !state.connected
+        || !state.ws
+        || state.ws.readyState !== WebSocket.OPEN
+        || state.speedProfilePending
+      ) {
+        els.maxApiToggle.checked = state.speedProfile === "max_api";
+        return;
+      }
+
+      state.keyState.clear();
+      await stopRobotNow();
+      state.speedProfilePending = normalized;
+      state.speedProfileCommandId = "";
+      els.maxApiToggle.disabled = true;
+      setBadge(
+        els.speedProfileStatus,
+        `solicitando ${normalized}...`,
+        "warn"
+      );
+      state.ws.send(JSON.stringify({
+        op: "set_speed_profile",
+        robot_id: state.robotId,
+        profile: normalized,
+      }));
+    }
+
+    function clearReconnectTimer() {
+      if (state.reconnectTimer) {
+        clearTimeout(state.reconnectTimer);
+        state.reconnectTimer = null;
+      }
+    }
+
+    function scheduleReconnect() {
+      if (state.reconnectTimer || !state.token || !state.apiBase || !state.robotId) {
+        return;
+      }
+
+      state.reconnectAttempt += 1;
+      const delayMs = Math.min(1000 * (2 ** (state.reconnectAttempt - 1)), 10000);
+      setStatus(`reconectando en ${(delayMs / 1000).toFixed(0)}s`, false);
+
+      state.reconnectTimer = setTimeout(() => {
+        state.reconnectTimer = null;
+        void connect(true);
+      }, delayMs);
+    }
+
+    async function connect(isReconnect = false) {
+      if (!isReconnect) {
+        clearReconnectTimer();
+        state.reconnectAttempt = 0;
+      }
+
+      state.token = els.token.value.trim();
+      state.apiBase = normalizeApiBase(els.apiBase.value);
+      els.apiBase.value = state.apiBase;
+      state.robotId = els.robotId.value.trim();
+      const generation = ++state.connectGeneration;
+
+      if (!state.token || !state.apiBase || !state.robotId) {
+        setStatus("faltan datos", false);
+        return;
+      }
+
+      try {
+        await activateControl();
+      } catch (err) {
+        if (generation !== state.connectGeneration) return;
+        setStatus("fallo API", false);
+        addEvent("connect_error", normalizeError(err));
+        scheduleReconnect();
+        return;
+      }
+
+      if (state.ws) {
+        const previousWs = state.ws;
+        state.ws = null;
+        try { previousWs.close(); } catch (e) { }
+      }
+
+      let url;
+      try {
+        url = wsUrlFromApi(state.apiBase, state.token);
+      } catch (err) {
+        if (generation !== state.connectGeneration) return;
+        setStatus("api invalida", false);
+        addEvent("connect_error", normalizeError(err));
+        return;
+      }
+
+      let ws;
+      try {
+        ws = new WebSocket(url);
+      } catch (err) {
+        if (generation !== state.connectGeneration) return;
+        addEvent("ws_create_error", normalizeError(err));
+        scheduleReconnect();
+        return;
+      }
+      state.ws = ws;
+
+      ws.onopen = async () => {
+        if (state.ws !== ws || generation !== state.connectGeneration) return;
+        clearReconnectTimer();
+        state.reconnectAttempt = 0;
+        state.connected = true;
+        els.maxApiToggle.disabled = false;
+        setStatus("conectado", true);
+        startControlLoop();
+        addEvent("ws_open", { robot_id: state.robotId });
+        await loadCapabilities();
+        await new Promise(resolve => setTimeout(resolve, 200));
+        if (state.ws !== ws || ws.readyState !== WebSocket.OPEN) return;
+        await applyMediaSettings();
+        void loadSavedMapList();
+      };
+
+      ws.onclose = (ev) => {
+        if (state.ws !== ws || generation !== state.connectGeneration) return;
+        state.ws = null;
+        state.connected = false;
+        state.keyState.clear();
+        state.speedProfile = "normal";
+        state.speedProfilePending = null;
+        state.speedProfileCommandId = "";
+        els.maxApiToggle.checked = false;
+        els.maxApiToggle.disabled = true;
+        setBadge(els.speedProfileStatus, "perfil normal · offline", "err");
+        updateSpeedUi();
+        resetAudioQueue();
+        releaseMediaFrames();
+        setStatus("desconectado", false);
+        stopControlLoop();
+        updateMediaStatus();
+        addEvent("ws_close", { code: ev.code, reason: ev.reason || "" });
+        scheduleReconnect();
+      };
+
+      ws.onerror = () => {
+        if (state.ws !== ws || generation !== state.connectGeneration) return;
+        addEvent("ws_error", "error websocket");
+      };
+
+      ws.onmessage = (ev) => {
+        if (state.ws !== ws || generation !== state.connectGeneration) return;
+        try {
+          const msg = JSON.parse(ev.data);
+          handleWsMessage(msg);
+        } catch (err) {
+          addEvent("ws_parse_error", ev.data);
+        }
+      };
+    }
+
+    document.querySelectorAll("button[data-cmd]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const cmd = btn.getAttribute("data-cmd");
+        if (!state.connected) return;
+
+        const speed = currentPreset();
+        if (cmd === "forward") return sendCommand("move", { linear_x: speed.forward, angular_z: 0.0, duration_ms: 520 });
+        if (cmd === "back") return sendCommand("move", { linear_x: -speed.reverse, angular_z: 0.0, duration_ms: 520 });
+        if (cmd === "left") return sendCommand("move", { linear_x: 0.0, angular_z: speed.angular, duration_ms: 460 });
+        if (cmd === "right") return sendCommand("move", { linear_x: 0.0, angular_z: -speed.angular, duration_ms: 460 });
+        if (cmd === "strafeL") return sendCommand("move", { linear_x: 0.0, lateral_y: speed.lateral, duration_ms: 520 });
+        if (cmd === "strafeR") return sendCommand("move", { linear_x: 0.0, lateral_y: -speed.lateral, duration_ms: 520 });
+        if (cmd === "stop") {
+          state.keyState.clear();
+          return stopRobotNow();
+        }
+        if (cmd === "modeManual") return sendCommand("enter_mode", { mode: "normal" });
+      });
+    });
+
+    els.connectBtn.addEventListener("click", async () => {
+      await ensureAudioContext(true);
+      await connect(false);
+    });
+
+    els.applyMediaBtn.addEventListener("click", async () => {
+      await applyMediaSettings();
+    });
+
+    els.networkProfile.addEventListener("change", async () => {
+      applyNetworkProfileValues();
+      if (state.connected) await applyMediaSettings();
+    });
+
+    els.unlockAudioBtn.addEventListener("click", async () => {
+      await ensureAudioContext(true);
+    });
+
+    els.refreshMapsBtn.addEventListener("click", async () => {
+      await loadSavedMapList();
+    });
+
+    els.saveMapBtn.addEventListener("click", async () => {
+      await saveCurrentMapSnapshot();
+    });
+
+    els.loadMapBtn.addEventListener("click", async () => {
+      await loadSelectedSavedMap();
+    });
+
+    els.savedMapSelect.addEventListener("dblclick", async () => {
+      await loadSelectedSavedMap();
+    });
+
+    els.resetMapViewBtn.addEventListener("click", resetSavedMapView);
+    els.fullscreenMapBtn.addEventListener("click", toggleSavedMapFullscreen);
+
+    els.videoFrame.addEventListener("click", () => {
+      openMediaModal("video");
+    });
+
+    els.lidarFrame.addEventListener("click", () => {
+      openMediaModal("lidar");
+    });
+
+    els.closeMediaModal.addEventListener("click", closeMediaModal);
+    els.expandedMediaCanvas.addEventListener("click", closeMediaModal);
+    els.mediaModal.addEventListener("click", (ev) => {
+      if (ev.target === els.mediaModal) {
+        closeMediaModal();
+      }
+    });
+
+    els.enableVideo.addEventListener("change", async () => {
+      if (state.connected) await applyMediaSettings();
+    });
+
+    els.enableLidar.addEventListener("change", async () => {
+      if (state.connected) await applyMediaSettings();
+    });
+
+    els.enableAudio.addEventListener("change", async () => {
+      if (state.connected) {
+        if (els.enableAudio.checked) {
+          await ensureAudioContext(false);
+        }
+        await applyMediaSettings();
+      }
+    });
+
+    els.speedSlider.addEventListener("input", () => {
+      updateSpeedUi();
+      if (state.lastMoveActive) {
+        sendDriveState(true);
+      }
+    });
+    els.maxApiToggle.addEventListener("change", async () => {
+      await requestSpeedProfile(els.maxApiToggle.checked ? "max_api" : "normal");
+    });
+    els.loopMs.addEventListener("change", () => {
+      if (state.connected) {
+        startControlLoop();
+      } else {
+        parseLoopMs();
+      }
+    });
+
+    function isTypingTarget(target) {
+      if (!(target instanceof Element)) return false;
+      return (
+        target.matches("input, textarea, select")
+        || target.isContentEditable
+      );
+    }
+
+    window.addEventListener("keydown", async (ev) => {
+      if (ev.code === "Escape" && els.savedMapShell.classList.contains("fullscreen")) {
+        ev.preventDefault();
+        toggleSavedMapFullscreen();
+        return;
+      }
+
+      if (ev.code === "Escape" && !els.mediaModal.hidden) {
+        ev.preventDefault();
+        closeMediaModal();
+        return;
+      }
+
+      if (MOVEMENT_KEYS.has(ev.code)) {
+        if (isTypingTarget(ev.target)) return;
+        ev.preventDefault();
+        const changed = !state.keyState.has(ev.code);
+        state.keyState.add(ev.code);
+        if (changed) {
+          sendDriveState(true);
+        }
+        return;
+      }
+
+      if (ev.code === "Space") {
+        ev.preventDefault();
+        state.keyState.clear();
+        await stopRobotNow();
+        return;
+      }
+
+      if (ev.repeat) return;
+
+      if (ev.code === "KeyL") {
+        els.enableLidar.checked = !els.enableLidar.checked;
+        if (state.connected) await applyMediaSettings();
+        return;
+      }
+
+      if (ev.code === "KeyP") {
+        els.enableAudio.checked = !els.enableAudio.checked;
+        if (els.enableAudio.checked) {
+          await ensureAudioContext(true);
+        }
+        if (state.connected) await applyMediaSettings();
+      }
+    });
+
+    window.addEventListener("keyup", (ev) => {
+      if (MOVEMENT_KEYS.has(ev.code)) {
+        ev.preventDefault();
+        state.keyState.delete(ev.code);
+        sendDriveState(true);
+      }
+    });
+
+    window.addEventListener("blur", () => {
+      state.keyState.clear();
+      void stopRobotNow();
+    });
+
+    window.addEventListener("beforeunload", () => {
+      releaseMediaFrames();
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+      state.ws.send(JSON.stringify({
+        op: "drive_stop",
+        robot_id: state.robotId,
+        sequence: ++state.driveSequence,
+      }));
+      if (state.speedProfile === "max_api" || state.speedProfilePending === "max_api") {
+        state.ws.send(JSON.stringify({
+          op: "set_speed_profile",
+          robot_id: state.robotId,
+          profile: "normal",
+        }));
+      }
+    });
+
+    els.maxApiToggle.disabled = true;
+    setupSavedMapInteraction();
+    updateSpeedUi();
+    updateMediaStatus();
+    updateMotionReadouts();
+    void loadSavedMapList();
+  </script>
+</body>
+</html>
+
+
+

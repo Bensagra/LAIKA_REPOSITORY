@@ -9,6 +9,7 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="index" />
           <Stack.Screen name="mision" />
+          <Stack.Screen name="data" />
         </Stack>
       </AppSettingsProvider>
     </GestureHandlerRootView>
