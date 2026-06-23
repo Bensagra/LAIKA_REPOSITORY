@@ -2,6 +2,7 @@ import { inflate } from 'pako';
 import { DOG_API_URL, DOG_ROBOT_ID, DOG_TOKEN } from './api';
 
 export type VideoFrameCallback = (dataUri: string) => void;
+export type VideoTickCallback = () => void;
 export type TelemetryCallback = (data: Record<string, unknown>) => void;
 export type StatusCallback = (connected: boolean) => void;
 export type LidarFrameMeta = {
@@ -24,6 +25,7 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let currentGen = 0;
 
 let cbVideo: VideoFrameCallback | null = null;
+let cbVideoTick: VideoTickCallback | null = null;
 let cbTelemetry: TelemetryCallback | null = null;
 let cbStatus: StatusCallback | null = null;
 let cbLidar: LidarCallback | null = null;
@@ -42,6 +44,135 @@ function uint8ToBase64(bytes: Uint8Array): string {
     str += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
   return btoa(str);
+}
+
+// ─── Video: canvas sinks + decodificación H.264 (WebCodecs) ──────────────────
+// El edge transmite H.264 Annex-B (keyframe cada GOP + deltas). El navegador lo
+// decodifica por hardware con VideoDecoder y lo pintamos en cada <canvas>
+// registrado. webp/jpeg (fallback MJPEG) también se pinta en esos canvas.
+const videoCanvases = new Set<HTMLCanvasElement>();
+
+export function registerVideoCanvas(canvas: HTMLCanvasElement): () => void {
+  videoCanvases.add(canvas);
+  return () => { videoCanvases.delete(canvas); };
+}
+
+export function webCodecsAvailable(): boolean {
+  const g = globalThis as any;
+  return typeof g.VideoDecoder === 'function' && typeof g.EncodedVideoChunk === 'function';
+}
+
+function drawToCanvases(source: CanvasImageSource, w: number, h: number): void {
+  videoCanvases.forEach((canvas) => {
+    if (w && h && (canvas.width !== w || canvas.height !== h)) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true } as any) as CanvasRenderingContext2D | null;
+    if (ctx) ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+  });
+}
+
+const videoDecoder = {
+  decoder: null as any,
+  codec: '',
+  configured: false,
+  needKeyframe: true,
+  frameCount: 0,
+  unsupportedLogged: false,
+};
+
+function resetVideoDecoder(): void {
+  if (videoDecoder.decoder) {
+    try { videoDecoder.decoder.close(); } catch { /* ignore */ }
+  }
+  videoDecoder.decoder = null;
+  videoDecoder.configured = false;
+  videoDecoder.codec = '';
+  videoDecoder.needKeyframe = true;
+  videoDecoder.frameCount = 0;
+}
+
+function handleDecodedVideoFrame(frame: any): void {
+  try {
+    const w = frame.displayWidth || frame.codedWidth;
+    const h = frame.displayHeight || frame.codedHeight;
+    drawToCanvases(frame, w, h);
+    cbVideoTick?.();
+  } catch { /* ignore */ } finally {
+    frame.close();
+  }
+}
+
+function ensureVideoDecoder(codec: string): boolean {
+  const vd = videoDecoder;
+  if (vd.decoder && vd.configured && vd.codec === codec) return true;
+  if (vd.decoder) {
+    try { vd.decoder.close(); } catch { /* ignore */ }
+  }
+  const VideoDecoderCtor = (globalThis as any).VideoDecoder;
+  vd.decoder = new VideoDecoderCtor({
+    output: handleDecodedVideoFrame,
+    error: () => resetVideoDecoder(),
+  });
+  try {
+    vd.decoder.configure({ codec, optimizeForLatency: true });
+  } catch {
+    resetVideoDecoder();
+    return false;
+  }
+  vd.codec = codec;
+  vd.configured = true;
+  vd.needKeyframe = true;
+  vd.frameCount = 0;
+  return true;
+}
+
+function decodeH264(header: Record<string, unknown>, bytes: Uint8Array): void {
+  if (!webCodecsAvailable()) {
+    if (!videoDecoder.unsupportedLogged) {
+      videoDecoder.unsupportedLogged = true;
+      cbEvent?.('video_unsupported', 'WebCodecs no disponible: usá Chrome/Edge para ver H.264');
+    }
+    return;
+  }
+  const codec = String((header.codec as string) || 'avc1.42e01e');
+  if (!ensureVideoDecoder(codec)) return;
+
+  const vd = videoDecoder;
+  const isKey = !!header.key;
+  if (vd.needKeyframe) {
+    // No se puede arrancar (ni resincronizar) en un delta: esperá un keyframe.
+    if (!isKey) return;
+    vd.needKeyframe = false;
+  }
+  if (!bytes || !bytes.length) return;
+
+  const fps = Math.max(1, Number(header.target_fps) || 30);
+  const timestamp = Math.round((vd.frameCount++ * 1e6) / fps);
+  const EncodedVideoChunkCtor = (globalThis as any).EncodedVideoChunk;
+  try {
+    vd.decoder.decode(new EncodedVideoChunkCtor({
+      type: isKey ? 'key' : 'delta',
+      timestamp,
+      data: bytes,
+    }));
+  } catch {
+    resetVideoDecoder();
+  }
+}
+
+// webp/jpeg/png entregado como bytes crudos → pintar en los canvas (web).
+function drawImageBytesToCanvases(bytes: Uint8Array, mime: string): void {
+  if (videoCanvases.size === 0 || typeof createImageBitmap !== 'function') return;
+  const copy = bytes.slice(0);
+  createImageBitmap(new Blob([copy], { type: mime }))
+    .then((bmp) => {
+      drawToCanvases(bmp, bmp.width, bmp.height);
+      cbVideoTick?.();
+      if (typeof bmp.close === 'function') bmp.close();
+    })
+    .catch(() => { /* ignore bad frame */ });
 }
 
 function i16ToPoints(raw: Uint8Array, count: number, scale: number, offset: number[]): Float32Array {
@@ -112,8 +243,13 @@ function parseFrame(buffer: ArrayBuffer): void {
 
   if (stream === 'video') {
     const fmt = String(header.image_format ?? '');
-    if (fmt === 'h264') return;
+    if (fmt === 'h264') {
+      decodeH264(header, payload);
+      return;
+    }
     const mime = fmt === 'png' ? 'image/png' : fmt === 'webp' ? 'image/webp' : 'image/jpeg';
+    // En web pintamos en el canvas; el data URI sólo lo necesita el <Image> de nativo.
+    drawImageBytesToCanvases(payload, mime);
     cbVideo?.(`data:${mime};base64,${uint8ToBase64(payload)}`);
     return;
   }
@@ -203,6 +339,7 @@ function doConnect(gen: number): void {
 
     socket.onopen = () => {
       if (gen !== currentGen) return;
+      resetVideoDecoder();
       cbStatus?.(true);
       cbOpen?.();
     };
@@ -230,6 +367,7 @@ function doConnect(gen: number): void {
 
 export function connectRobotWS(opts: {
   onVideoFrame?: VideoFrameCallback;
+  onVideoTick?: VideoTickCallback;
   onTelemetry?: TelemetryCallback;
   onStatus?: StatusCallback;
   onLidar?: LidarCallback;
@@ -243,6 +381,7 @@ export function connectRobotWS(opts: {
 }): () => void {
   const gen = ++currentGen;
   cbVideo = opts.onVideoFrame ?? null;
+  cbVideoTick = opts.onVideoTick ?? null;
   cbTelemetry = opts.onTelemetry ?? null;
   cbStatus = opts.onStatus ?? null;
   cbLidar = opts.onLidar ?? null;
@@ -261,7 +400,9 @@ export function connectRobotWS(opts: {
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     ws?.close();
     ws = null;
+    resetVideoDecoder();
     cbVideo = null;
+    cbVideoTick = null;
     cbTelemetry = null;
     cbStatus = null;
     cbLidar = null;

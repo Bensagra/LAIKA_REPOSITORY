@@ -1,5 +1,7 @@
 import { inflate } from 'pako';
-import { DOG_API_URL, DOG_ROBOT_ID, DOG_TOKEN, sendDogCommand } from './api';
+import { Platform } from 'react-native';
+import { activateDogControl, DOG_API_URL, DOG_ROBOT_ID, DOG_TOKEN, sendDogCommand } from './api';
+import { webCodecsAvailable } from './robotSocket';
 
 export const DEFAULT_SPEED_PROFILES = {
   normal: {
@@ -180,10 +182,17 @@ export async function configureDogMedia(settings: DogMediaSettings): Promise<voi
   const audioEmitEvery = clamp(Math.round(settings.audioEmitEvery), 1, 10);
   const audioMaxBytes = clamp(Math.round(settings.audioMaxBytes), 0, 262144);
 
+  // H.264 (compresión inter-cuadro) cuando el navegador puede decodificarlo por
+  // hardware; webp (MJPEG) como fallback para nativo / navegadores sin WebCodecs.
+  const cameraFormat = Platform.OS === 'web' && webCodecsAvailable() ? 'h264' : 'webp';
+
+  // El robot rechaza set_camera_stream si el operador no tiene el control activado.
+  await activateDogControl().catch(() => {});
+
   await sendDogCommand('set_camera_stream', {
     enabled: settings.video,
     emit_every: 1,
-    format: profile.cameraFormat,
+    format: cameraFormat,
     bitrate_kbps: bitrate,
     jpeg_quality: cameraQuality,
     min_quality: profile.cameraMinQuality,

@@ -47,6 +47,7 @@ import {
 } from '../services/api';
 import {
   connectRobotWS,
+  registerVideoCanvas,
   requestRobotSpeedProfile,
   sendRobotDrive,
   sendRobotDriveStop,
@@ -468,6 +469,51 @@ const LiveFeed = ({
     </View>
   </View>
 );
+
+// ─── Cámara: en web usa un <canvas> (decodifica H.264/WebCodecs); en nativo el <Image> webp ──
+const CameraFeed = ({
+  feed,
+  label,
+  status,
+}: {
+  feed: VisualFeedState;
+  label: string;
+  status: string;
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !canvasRef.current) return;
+    return registerVideoCanvas(canvasRef.current);
+  }, []);
+
+  if (Platform.OS !== 'web') {
+    return <LiveFeed feed={feed} label={label} status={status} />;
+  }
+
+  return (
+    <View style={styles.videoStreamContainer}>
+      {React.createElement('canvas', {
+        ref: canvasRef,
+        style: {
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          display: 'block',
+          backgroundColor: '#000',
+        },
+      })}
+      {!feed.lastFrameAt && (
+        <View style={styles.cameraPlaceholderOverlay} pointerEvents="none">
+          <Text style={styles.videoPlaceholderText}>{label}</Text>
+        </View>
+      )}
+      <View style={styles.feedBadge}>
+        <Text style={styles.feedBadgeText}>{status}</Text>
+      </View>
+    </View>
+  );
+};
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 function getFeedStatus(
@@ -951,6 +997,14 @@ export default function MisionScreen() {
         lastVideoRef.current = now;
         setCameraFeed({ uri, lastFrameAt: now });
       },
+      onVideoTick: () => {
+        // H.264 se dibuja directo en el canvas y no genera URI: sólo marcamos
+        // que llegó un cuadro para que el estado pase a "CAM live".
+        const now = Date.now();
+        if (now - lastVideoRef.current < 200) return;
+        lastVideoRef.current = now;
+        setCameraFeed((prev) => ({ uri: prev.uri, lastFrameAt: now }));
+      },
       onTelemetry: (data) => {
         const now = Date.now();
         if (now - lastTelemetryRef.current < 500) return;
@@ -1171,7 +1225,7 @@ export default function MisionScreen() {
 
   const CamView = useCallback(
     () => (
-      <LiveFeed
+      <CameraFeed
         feed={cameraFeed}
         label="[ CAMARA GO2 ]"
         status={cameraStatus}
