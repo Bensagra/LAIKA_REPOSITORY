@@ -279,49 +279,31 @@ const MapPreview = ({ map }: { map: LoadedDogMap | null }) => {
   );
 };
 
-// ─── Joystick base (shared logic) ────────────────────────────────────────────
-function makeJoystick(
-  onAxes: (nx: number, ny: number, spd: number) => void,
-  onStop: () => void
-) {
-  return function JoystickBase() {
-    const { robotSpeed } = useAppSettings();
-    const speedRef = useRef(robotSpeed / 100);
-    speedRef.current = robotSpeed / 100;
+// ─── Joysticks en pantalla ────────────────────────────────────────────────────
+// Igual que el operator console: cada stick sólo escribe su valor normalizado
+// (-1..1) en este estado compartido; el loop de control único combina ambos
+// (izq = trasladar, der = girar) + teclado y manda UN solo `drive` por WebSocket.
+const joystickState = { left: { x: 0, y: 0 }, right: { x: 0, y: 0 } };
 
+function makeJoystick(which: 'left' | 'right') {
+  return function JoystickBase() {
     const [stickPos, setStickPos] = useState({ x: 0, y: 0 });
-    const stickRef = useRef({ x: 0, y: 0 });
-    const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const MAX = s(60);
 
-    const stopFn = useRef(onStop);
-    stopFn.current = onStop;
-    const axesFn = useRef(onAxes);
-    axesFn.current = onAxes;
-
     const release = useCallback(() => {
-      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       setStickPos({ x: 0, y: 0 });
-      stickRef.current = { x: 0, y: 0 };
-      stopFn.current();
+      joystickState[which] = { x: 0, y: 0 };
     }, []);
 
     const pan = useRef(PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
-        if (timerRef.current) return;
-        timerRef.current = setInterval(() => {
-          const { x, y } = stickRef.current;
-          axesFn.current(x / MAX, y / MAX, speedRef.current);
-        }, 180);
-      },
       onPanResponderMove: (_, { dx, dy }) => {
         const dist = Math.sqrt(dx * dx + dy * dy);
         const r = dist > MAX ? MAX / dist : 1;
         const pos = { x: dx * r, y: dy * r };
-        stickRef.current = pos;
         setStickPos(pos);
+        joystickState[which] = { x: pos.x / MAX, y: pos.y / MAX };
       },
       onPanResponderRelease: () => release(),
       onPanResponderTerminate: () => release(),
@@ -339,24 +321,9 @@ function makeJoystick(
   };
 }
 
-// Izquierdo: linear_x (adelante/atrás) + linear_y (strafe), sin rotación
-const JoystickLeft = makeJoystick(
-  (nx, ny, spd) => {
-    if (Math.abs(nx) < 0.1 && Math.abs(ny) < 0.1) return;
-    const fwdMax = ny < 0 ? 3.5 : 2.3;
-    moveRobotAxes(-ny * fwdMax * spd, -nx * 0.92 * spd, 0, 350).catch(() => {});
-  },
-  () => moveRobotAxes(0, 0, 0).catch(() => {})
-);
-
-// Derecho: solo angular_z (giro sobre eje), sin traslación
-const JoystickRight = makeJoystick(
-  (nx, _ny, spd) => {
-    if (Math.abs(nx) < 0.1) return;
-    moveRobotAxes(0, 0, -nx * 3.68 * spd, 350).catch(() => {});
-  },
-  () => moveRobotAxes(0, 0, 0).catch(() => {})
-);
+// Izquierdo: trasladar (adelante/atrás + lateral). Derecho: girar (yaw).
+const JoystickLeft = makeJoystick('left');
+const JoystickRight = makeJoystick('right');
 
 // ─── D-Pad component ──────────────────────────────────────────────────────────
 const DPad = () => {
@@ -1075,7 +1042,6 @@ export default function MisionScreen() {
   }, [mediaConnected]);
 
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
     const movementKeys = new Set([
       'KeyW', 'KeyA', 'KeyS', 'KeyD',
       'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight',
@@ -1088,7 +1054,10 @@ export default function MisionScreen() {
       return !!el?.matches?.('input, textarea, select, [contenteditable="true"]');
     };
     let wasActive = false;
-    const sendKeys = () => {
+    let lastSig = '';
+    // Combina teclado + ambos joysticks en un único vector de movimiento y lo
+    // manda por WebSocket (drive continuo). Izq = trasladar, der = girar.
+    const sendDrive = () => {
       const keys = keyStateRef.current;
       const speed = currentSpeedPreset();
       let x = 0, y = 0, z = 0;
@@ -1098,6 +1067,17 @@ export default function MisionScreen() {
       if (['KeyD', 'ArrowRight', 'Digit3', 'Digit6', 'Numpad3', 'Numpad6'].some((k) => keys.has(k))) z -= speed.angular;
       if (['KeyQ', 'KeyZ'].some((k) => keys.has(k))) y += speed.lateral;
       if (['KeyE', 'KeyC'].some((k) => keys.has(k))) y -= speed.lateral;
+
+      const jl = joystickState.left;
+      const jr = joystickState.right;
+      if (Math.abs(jl.y) > 0.12) x += -jl.y * (jl.y < 0 ? speed.forward : speed.reverse);
+      if (Math.abs(jl.x) > 0.12) y += -jl.x * speed.lateral;
+      if (Math.abs(jr.x) > 0.12) z += -jr.x * speed.angular;
+
+      x = clamp(x, -speed.reverse, speed.forward);
+      y = clamp(y, -speed.lateral, speed.lateral);
+      z = clamp(z, -speed.angular, speed.angular);
+
       if (x || y || z) {
         if (!sendRobotDrive(x, y, z, 360)) moveRobotAxes(x, y, z, 360).catch(() => {});
         wasActive = true;
@@ -1105,13 +1085,27 @@ export default function MisionScreen() {
         if (wasActive) sendRobotDriveStop();
         wasActive = false;
       }
-      setRequestedMove({ x, y, z });
+      // Sólo re-render cuando el vector cambió, para no machacar el estado a 90ms.
+      const sig = `${x.toFixed(2)}|${y.toFixed(2)}|${z.toFixed(2)}`;
+      if (sig !== lastSig) {
+        lastSig = sig;
+        setRequestedMove({ x, y, z });
+      }
     };
+
+    const loop = setInterval(sendDrive, 90);
+
+    if (Platform.OS !== 'web') {
+      return () => clearInterval(loop);
+    }
+
     const down = (event: KeyboardEvent) => {
       if (typingTarget(event.target)) return;
       if (event.code === 'Space') {
         event.preventDefault();
         keyStateRef.current.clear();
+        joystickState.left = { x: 0, y: 0 };
+        joystickState.right = { x: 0, y: 0 };
         sendRobotDriveStop();
         emergencyStop().catch(() => {});
         setRequestedMove({ x: 0, y: 0, z: 0 });
@@ -1120,13 +1114,13 @@ export default function MisionScreen() {
       if (!movementKeys.has(event.code)) return;
       event.preventDefault();
       keyStateRef.current.add(event.code);
-      sendKeys();
+      sendDrive();
     };
     const up = (event: KeyboardEvent) => {
       if (!movementKeys.has(event.code)) return;
       event.preventDefault();
       keyStateRef.current.delete(event.code);
-      sendKeys();
+      sendDrive();
     };
     const blur = () => {
       keyStateRef.current.clear();
@@ -1134,7 +1128,6 @@ export default function MisionScreen() {
       wasActive = false;
       setRequestedMove({ x: 0, y: 0, z: 0 });
     };
-    const loop = setInterval(sendKeys, 90);
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
     window.addEventListener('blur', blur);
