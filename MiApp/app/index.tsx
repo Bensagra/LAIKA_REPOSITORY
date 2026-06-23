@@ -13,7 +13,7 @@ import {
 import { useRouter } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { crearMision, registerUser, loginUser, setBackendHost, getBackendHost } from '../services/api';
+import { crearMision, DOG_API_URL, registerUser, loginUser, setBackendHost, getBackendHost } from '../services/api';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import 'react-native-gesture-handler';
 
@@ -151,6 +151,9 @@ export default function HomeScreen() {
               />
               <Text style={{ color: '#555', fontFamily: 'monospace', fontSize: s(10) }}>
                 Puerto 3000 (backend) y 3001 (IA) se agregan solos
+              </Text>
+              <Text style={{ color: '#555', fontFamily: 'monospace', fontSize: s(10) }}>
+                API robot fija: {DOG_API_URL}
               </Text>
             </View>
           </Pressable>

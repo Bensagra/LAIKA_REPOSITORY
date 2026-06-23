@@ -13,6 +13,8 @@ import {
   Alert,
   Platform,
   PanResponder,
+  Switch,
+  TextInput,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
@@ -38,13 +40,47 @@ import {
   AnalysisResult,
   DañoDetectado,
   finalizarMision,
-  configureDogVisualStreams,
   emergencyStop,
   autonomousStart,
   autonomousStop,
+  sendDogCommand,
 } from '../services/api';
-import { connectRobotWS } from '../services/robotSocket';
-import Svg, { Circle } from 'react-native-svg';
+import {
+  connectRobotWS,
+  requestRobotSpeedProfile,
+  sendRobotDrive,
+  sendRobotDriveStop,
+  sendRobotHeartbeat,
+} from '../services/robotSocket';
+import Svg, { Circle, Line } from 'react-native-svg';
+import {
+  applyDogColorCalibration,
+  ColorCalibration,
+  configureDogMedia,
+  DEFAULT_SPEED_PROFILES,
+  dogAutonomyAction,
+  dogFaceImageUrl,
+  DogFace,
+  DogMediaSettings,
+  DogMapMetadata,
+  formatDogMapLabel,
+  getDogCapabilities,
+  getDogMeshSummary,
+  getPerceptionCapabilities,
+  listDogFaces,
+  listDogMaps,
+  LoadedDogMap,
+  loadDogMap,
+  NETWORK_PROFILES,
+  NetworkProfileKey,
+  purgeDogFaces,
+  rebuildDogMesh,
+  saveDogMapSnapshot,
+  setDogGreeter,
+  SpeedProfileKey,
+  testDogGreeting,
+  updateDogFace,
+} from '../services/operator';
 const { width } = Dimensions.get('window');
 
 interface Edificio {
@@ -57,6 +93,190 @@ interface VisualFeedState {
   uri: string | null;
   lastFrameAt: number;
 }
+
+interface OperatorEvent {
+  id: string;
+  ts: string;
+  type: string;
+  data: unknown;
+}
+
+interface AutonomyInfo {
+  status: string;
+  coverage: number | null;
+  captures: number;
+  goal: string | null;
+  running: boolean;
+}
+
+const RED = '#f23b3f';
+const OK = '#45d483';
+const WARN = '#ffb347';
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function stringifyShort(value: unknown, max = 110) {
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  if (!text) return '';
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function getSafetyReadout(telemetry: Record<string, unknown> | null) {
+  const safety = (telemetry?.safety ?? {}) as any;
+  const sectors = safety.sectors_m ?? {};
+  const intervention = safety.last_intervention ?? {};
+  const fmt = (v: unknown) => (v === null || v === undefined ? '∞' : `${Number(v).toFixed(2)}m`);
+  return {
+    guard: safety.enabled ? (safety.armed ? 'ARMADO' : 'sin LiDAR') : 'OFF',
+    guardOk: !!safety.armed,
+    front: fmt(sectors.front),
+    frontDanger: sectors.front !== null && sectors.front !== undefined && Number(sectors.front) < 0.5,
+    sides: `${fmt(sectors.left)} / ${fmt(sectors.right)} / ${fmt(sectors.back)}`,
+    cliff: safety.cliff ? 'DETECTADO' : 'ok',
+    cliffDanger: !!safety.cliff,
+    last: intervention.blocked ? String((intervention.reasons ?? []).join(', ')) : 'ninguna',
+  };
+}
+
+const StatusBadge = ({ text, mode = 'muted' }: { text: string; mode?: 'ok' | 'warn' | 'err' | 'muted' }) => (
+  <View style={[
+    styles.statusChip,
+    mode === 'ok' && styles.statusChipOk,
+    mode === 'warn' && styles.statusChipWarn,
+    mode === 'err' && styles.statusChipErr,
+  ]}>
+    <Text style={[
+      styles.statusChipText,
+      mode === 'ok' && { color: OK },
+      mode === 'warn' && { color: WARN },
+      mode === 'err' && { color: RED },
+    ]}>{text}</Text>
+  </View>
+);
+
+const OperatorButton = ({
+  label,
+  onPress,
+  tone = 'default',
+  disabled = false,
+}: {
+  label: string;
+  onPress: () => void;
+  tone?: 'default' | 'ok' | 'warn' | 'danger';
+  disabled?: boolean;
+}) => (
+  <TouchableOpacity
+    activeOpacity={0.75}
+    disabled={disabled}
+    onPress={onPress}
+    style={[
+      styles.operatorButton,
+      tone === 'ok' && styles.operatorButtonOk,
+      tone === 'warn' && styles.operatorButtonWarn,
+      tone === 'danger' && styles.operatorButtonDanger,
+      disabled && { opacity: 0.42 },
+    ]}
+  >
+    <Text style={[
+      styles.operatorButtonText,
+      tone === 'ok' && { color: OK },
+      tone === 'warn' && { color: WARN },
+      tone === 'danger' && { color: RED },
+    ]}>{label}</Text>
+  </TouchableOpacity>
+);
+
+const NumberField = ({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  decimals = 0,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+  min: number;
+  max: number;
+  step?: number;
+  decimals?: number;
+}) => {
+  const set = (next: number) => onChange(Number(clamp(next, min, max).toFixed(decimals)));
+  return (
+    <View style={styles.numberField}>
+      <Text style={styles.numberLabel}>{label}</Text>
+      <View style={styles.numberControls}>
+        <TouchableOpacity style={styles.numberStep} onPress={() => set(value - step)}>
+          <Text style={styles.numberStepText}>−</Text>
+        </TouchableOpacity>
+        <TextInput
+          value={value.toFixed(decimals)}
+          onChangeText={(text) => {
+            const parsed = Number(text.replace(',', '.'));
+            if (Number.isFinite(parsed)) set(parsed);
+          }}
+          keyboardType="numeric"
+          style={styles.numberInput}
+        />
+        <TouchableOpacity style={styles.numberStep} onPress={() => set(value + step)}>
+          <Text style={styles.numberStepText}>+</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+};
+
+const MapPreview = ({ map }: { map: LoadedDogMap | null }) => {
+  const W = 338, H = 170, PAD = 8;
+  const { dots, path } = React.useMemo(() => {
+    if (!map || map.points.length < 3) return { dots: [] as { cx: number; cy: number }[], path: [] as { x: number; y: number }[] };
+    const count = map.points.length / 3;
+    const sampleStep = Math.max(1, Math.ceil(count / 650));
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let i = 0; i < count; i += sampleStep) {
+      const x = map.points[i * 3], y = map.points[i * 3 + 1];
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    }
+    const rx = (maxX - minX) || 1;
+    const ry = (maxY - minY) || 1;
+    const project = (x: number, y: number) => ({
+      x: PAD + ((x - minX) / rx) * (W - 2 * PAD),
+      y: H - (PAD + ((y - minY) / ry) * (H - 2 * PAD)),
+    });
+    const dots = [];
+    for (let i = 0; i < count; i += sampleStep) {
+      const p = project(map.points[i * 3], map.points[i * 3 + 1]);
+      dots.push({ cx: p.x, cy: p.y });
+    }
+    const path = [];
+    for (let i = 0; i < map.path.length / 2; i += Math.max(1, Math.ceil((map.path.length / 2) / 160))) {
+      path.push(project(map.path[i * 2], map.path[i * 2 + 1]));
+    }
+    return { dots, path };
+  }, [map]);
+
+  return (
+    <View style={styles.savedMapPreview}>
+      {map ? (
+        <Svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`}>
+          {path.length > 1 && path.slice(1).map((p, i) => (
+            <Line key={`path-${i}`} x1={path[i].x} y1={path[i].y} x2={p.x} y2={p.y} stroke={WARN} strokeWidth={1.4} opacity={0.9} />
+          ))}
+          {dots.map((d, i) => (
+            <Circle key={i} cx={d.cx} cy={d.cy} r={1.1} fill="#00e676" opacity={0.72} />
+          ))}
+        </Svg>
+      ) : (
+        <Text style={styles.savedMapPlaceholder}>MAPA 3D</Text>
+      )}
+    </View>
+  );
+};
 
 // ─── Joystick base (shared logic) ────────────────────────────────────────────
 function makeJoystick(
@@ -221,6 +441,7 @@ const LidarMapView = React.memo(({
     </View>
   );
 });
+LidarMapView.displayName = 'LidarMapView';
 
 // ─── Placeholder views ────────────────────────────────────────────────────────
 const LiveFeed = ({
@@ -291,18 +512,414 @@ export default function MisionScreen() {
   const [telemetry, setTelemetry] = useState<Record<string, unknown> | null>(null);
   const [lidarData, setLidarData] = useState<{ points: Float32Array; count: number } | null>(null);
   const [activeBottomTab, setActiveBottomTab] = useState<'lidar' | 'telemetry' | 'status'>('lidar');
+  const [operatorEvents, setOperatorEvents] = useState<OperatorEvent[]>([]);
+  const [networkProfile, setNetworkProfile] = useState<NetworkProfileKey>('weak');
+  const [mediaSettings, setMediaSettings] = useState<Omit<DogMediaSettings, 'profile'>>(() => ({
+    video: true,
+    lidar: true,
+    audio: false,
+    cameraFps: NETWORK_PROFILES.weak.cameraFps,
+    cameraQuality: NETWORK_PROFILES.weak.cameraQuality,
+    cameraWidth: NETWORK_PROFILES.weak.cameraWidth,
+    cameraBitrateKbps: NETWORK_PROFILES.weak.cameraBitrateKbps,
+    audioEmitEvery: 2,
+    audioMaxBytes: 24576,
+  }));
+  const [mediaApplyStatus, setMediaApplyStatus] = useState('media lista');
+  const [speedProfile, setSpeedProfile] = useState<SpeedProfileKey>('normal');
+  const [speedProfiles, setSpeedProfiles] = useState({
+    normal: { ...DEFAULT_SPEED_PROFILES.normal },
+    max_api: { ...DEFAULT_SPEED_PROFILES.max_api },
+  });
+  const [requestedMove, setRequestedMove] = useState({ x: 0, y: 0, z: 0 });
+  const [autonomyInfo, setAutonomyInfo] = useState<AutonomyInfo>({
+    status: 'manual',
+    coverage: null,
+    captures: 0,
+    goal: null,
+    running: false,
+  });
+  const [greeterOn, setGreeterOn] = useState(false);
+  const [greeterStatus, setGreeterStatus] = useState('saludo: --');
+  const [faces, setFaces] = useState<DogFace[]>([]);
+  const [facesStatus, setFacesStatus] = useState('caras: --');
+  const [perceptionStatus, setPerceptionStatus] = useState('percepción: --');
+  const [maps, setMaps] = useState<DogMapMetadata[]>([]);
+  const [selectedMapId, setSelectedMapId] = useState('');
+  const [loadedMap, setLoadedMap] = useState<LoadedDogMap | null>(null);
+  const [mapStatus, setMapStatus] = useState('mapas: --');
+  const [meshStatus, setMeshStatus] = useState('modelo: --');
+  const [meshSummary, setMeshSummary] = useState<{ vertexCount: number; faceCount: number } | null>(null);
+  const [colorCalibration, setColorCalibration] = useState<ColorCalibration>({
+    enabled: true,
+    fovDeg: 150,
+    pitchDeg: 0,
+    heightM: 0.3,
+    forwardM: 0.25,
+  });
+  const [netStats, setNetStats] = useState({ video: 0, lidar: 0, audio: 0, total: 0 });
+  const [recordingLidar, setRecordingLidar] = useState(false);
+  const [recordedFrames, setRecordedFrames] = useState(0);
   const lastVideoRef = useRef(0);
   const lastTelemetryRef = useRef(0);
   const lastLidarRef = useRef(0);
+  const netBytesRef = useRef({ video: 0, lidar: 0, audio: 0 });
+  const keyStateRef = useRef<Set<string>>(new Set());
+  const mediaSettingsRef = useRef(mediaSettings);
+  const networkProfileRef = useRef(networkProfile);
+  const lidarRecordRef = useRef<{ recording: boolean; startedAt: number; frames: { t: number; points: Float32Array; count: number }[] }>({
+    recording: false,
+    startedAt: 0,
+    frames: [],
+  });
   const [autoMode, setAutoMode] = useState(false);
 
   const menuAnim = useRef(new Animated.Value(0)).current;
   const dragX = useRef(new Animated.Value(0)).current;
   const dragY = useRef(new Animated.Value(0)).current;
 
+  const addOperatorEvent = useCallback((type: string, data: unknown) => {
+    setOperatorEvents((prev) => [
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        ts: new Date().toLocaleTimeString('es-AR'),
+        type,
+        data,
+      },
+      ...prev,
+    ].slice(0, 80));
+  }, []);
+
+  const refreshCapabilities = useCallback(async () => {
+    try {
+      const caps = await getDogCapabilities();
+      if (caps.speed_profiles) {
+        setSpeedProfiles({
+          normal: { ...DEFAULT_SPEED_PROFILES.normal, ...(caps.speed_profiles.normal ?? {}) },
+          max_api: { ...DEFAULT_SPEED_PROFILES.max_api, ...(caps.speed_profiles.max_api ?? {}) },
+        });
+      }
+      if (caps.active_speed_profile === 'max_api' || caps.active_speed_profile === 'normal') {
+        setSpeedProfile(caps.active_speed_profile);
+      }
+      addOperatorEvent('capabilities', { role: caps.role, active_speed_profile: caps.active_speed_profile });
+    } catch (error) {
+      addOperatorEvent('capabilities_error', error instanceof Error ? error.message : String(error));
+    }
+  }, [addOperatorEvent]);
+
+  const refreshFaces = useCallback(async () => {
+    try {
+      const [people, caps] = await Promise.all([
+        listDogFaces(),
+        getPerceptionCapabilities().catch(() => null),
+      ]);
+      setFaces(people);
+      setFacesStatus(people.length ? `${people.length} persona(s)` : 'sin caras capturadas');
+      if (caps) {
+        const face = caps.face ?? {};
+        const person = caps.person_detector ?? {};
+        setPerceptionStatus(
+          caps.enabled
+            ? `personas ${person.available ? 'ON' : 'off'} · caras ${face.available ? 'ON' : 'off'} · reconoce ${face.recognition ? 'sí' : 'no'}`
+            : 'percepción deshabilitada'
+        );
+      }
+    } catch (error) {
+      setFacesStatus('caras: error');
+      addOperatorEvent('faces_error', error instanceof Error ? error.message : String(error));
+    }
+  }, [addOperatorEvent]);
+
+  const refreshMaps = useCallback(async () => {
+    try {
+      setMapStatus('consultando mapas...');
+      const next = await listDogMaps();
+      setMaps(next);
+      const preferred = next.find((m) => m.is_latest)?.map_id ?? next[0]?.map_id ?? '';
+      setSelectedMapId((current) => current || preferred);
+      setMapStatus(next.length ? `${next.length} mapa(s) en servidor` : 'sin mapas guardados');
+    } catch (error) {
+      setMapStatus('mapas: error');
+      addOperatorEvent('maps_error', error instanceof Error ? error.message : String(error));
+    }
+  }, [addOperatorEvent]);
+
+  const refreshMesh = useCallback(async () => {
+    try {
+      setMeshStatus('descargando resumen...');
+      const summary = await getDogMeshSummary();
+      setMeshSummary(summary);
+      setMeshStatus(`${summary.vertexCount.toLocaleString()} vértices · ${summary.faceCount.toLocaleString()} caras`);
+    } catch (error) {
+      setMeshStatus('sin modelo cargado');
+      addOperatorEvent('mesh_error', error instanceof Error ? error.message : String(error));
+    }
+  }, [addOperatorEvent]);
+
+  const applyMediaSettings = useCallback(async (settings = mediaSettings, profile = networkProfile) => {
+    try {
+      setMediaApplyStatus('aplicando media...');
+      await configureDogMedia({ ...settings, profile });
+      setMediaApplyStatus(`${NETWORK_PROFILES[profile].label} · cam ${settings.cameraFps}fps · lidar ${settings.lidar ? 'ON' : 'off'} · audio ${settings.audio ? 'ON' : 'off'}`);
+      addOperatorEvent('media_config_applied', { profile, ...settings });
+    } catch (error) {
+      setMediaApplyStatus('media: error');
+      addOperatorEvent('media_config_error', error instanceof Error ? error.message : String(error));
+    }
+  }, [addOperatorEvent, mediaSettings, networkProfile]);
+
+  const selectNetworkProfile = useCallback((profile: NetworkProfileKey) => {
+    const preset = NETWORK_PROFILES[profile];
+    const next = {
+      ...mediaSettings,
+      cameraFps: preset.cameraFps,
+      cameraQuality: preset.cameraQuality,
+      cameraWidth: preset.cameraWidth,
+      cameraBitrateKbps: preset.cameraBitrateKbps,
+    };
+    setNetworkProfile(profile);
+    setMediaSettings(next);
+    if (mediaConnected) void applyMediaSettings(next, profile);
+  }, [applyMediaSettings, mediaConnected, mediaSettings]);
+
+  const currentSpeedPreset = useCallback(() => {
+    const scale = robotSpeed / 100;
+    const profile = speedProfiles[speedProfile] ?? speedProfiles.normal;
+    return {
+      forward: profile.forward * scale,
+      reverse: profile.reverse * scale,
+      lateral: profile.lateral * scale,
+      angular: profile.angular * scale,
+    };
+  }, [robotSpeed, speedProfile, speedProfiles]);
+
+  const requestSpeedMode = useCallback((next: SpeedProfileKey) => {
+    sendRobotDriveStop();
+    const ok = requestRobotSpeedProfile(next);
+    if (ok) {
+      setSpeedProfile(next);
+      addOperatorEvent('speed_profile_requested', next);
+    } else {
+      addOperatorEvent('speed_profile_error', 'WebSocket no disponible');
+    }
+  }, [addOperatorEvent]);
+
+  const updateAutonomyFromMessage = useCallback((message: Record<string, any>) => {
+    const event = String(message.event ?? '');
+    const data = message.data ?? {};
+    if (event === 'autonomy_state') {
+      const plan = data.plan ?? {};
+      setAutonomyInfo((prev) => ({
+        status: data.state ?? prev.status,
+        coverage: plan.coverage ?? prev.coverage,
+        captures: data.captures ?? prev.captures,
+        goal: Array.isArray(plan.goal_xy) ? plan.goal_xy.map((v: number) => Number(v).toFixed(1)).join(', ') : prev.goal,
+        running: !!data.running,
+      }));
+    } else if (event === 'autonomy_done') {
+      setAutonomyInfo((prev) => ({
+        ...prev,
+        status: 'done',
+        coverage: data.coverage ?? prev.coverage,
+        running: false,
+      }));
+    } else if (event === 'person_captured') {
+      setAutonomyInfo((prev) => ({ ...prev, captures: prev.captures + 1 }));
+      void refreshFaces();
+    } else if (event === 'autonomy_error') {
+      setAutonomyInfo((prev) => ({ ...prev, status: 'error', running: false }));
+    }
+  }, [refreshFaces]);
+
+  const runAutonomyAction = useCallback(async (action: 'start' | 'stop' | 'estop') => {
+    try {
+      const result = await dogAutonomyAction(action);
+      setAutoMode(action === 'start');
+      setAutonomyInfo((prev) => ({
+        ...prev,
+        status: String(result.state ?? action),
+        running: action === 'start',
+      }));
+      addOperatorEvent('autonomy_action', { action, result });
+    } catch (error) {
+      addOperatorEvent('autonomy_error', error instanceof Error ? error.message : String(error));
+      if (action === 'start') {
+        setAutoMode(true);
+        autonomousStart().catch(() => setAutoMode(false));
+      } else {
+        setAutoMode(false);
+        autonomousStop().catch(() => {});
+      }
+    }
+  }, [addOperatorEvent]);
+
+  const toggleGreeter = useCallback(async () => {
+    try {
+      const result = await setDogGreeter(!greeterOn);
+      setGreeterOn(!!result.enabled);
+      setGreeterStatus(result.available ? 'saludo listo' : 'sin detector de personas');
+      addOperatorEvent('greeter', result);
+    } catch (error) {
+      setGreeterStatus('saludo: error');
+      addOperatorEvent('greeter_error', error instanceof Error ? error.message : String(error));
+    }
+  }, [addOperatorEvent, greeterOn]);
+
+  const saveSnapshot = useCallback(async () => {
+    try {
+      setMapStatus('guardando snapshot...');
+      const saved = await saveDogMapSnapshot();
+      addOperatorEvent('map_snapshot_saved', saved);
+      await refreshMaps();
+      setSelectedMapId(saved.map_id || 'latest');
+      setMapStatus(`snapshot guardado · ${Number(saved.point_count || 0).toLocaleString()} pts`);
+    } catch (error) {
+      setMapStatus('snapshot: error');
+      addOperatorEvent('map_snapshot_error', error instanceof Error ? error.message : String(error));
+    }
+  }, [addOperatorEvent, refreshMaps]);
+
+  const openSelectedMap = useCallback(async () => {
+    if (!selectedMapId) {
+      setMapStatus('elegí un mapa');
+      return;
+    }
+    try {
+      setMapStatus('descargando mapa...');
+      const map = await loadDogMap(selectedMapId);
+      setLoadedMap(map);
+      setMapStatus(`${(map.points.length / 3).toLocaleString()} puntos · ${(map.path.length / 2).toLocaleString()} poses`);
+      addOperatorEvent('map_loaded', map.metadata);
+    } catch (error) {
+      setMapStatus('mapa: error');
+      addOperatorEvent('map_load_error', error instanceof Error ? error.message : String(error));
+    }
+  }, [addOperatorEvent, selectedMapId]);
+
+  const rebuildMesh = useCallback(async () => {
+    try {
+      setMeshStatus('reconstruyendo...');
+      const result = await rebuildDogMesh();
+      addOperatorEvent('mesh_rebuild', result);
+      await refreshMesh();
+    } catch (error) {
+      setMeshStatus('reconstrucción: error');
+      addOperatorEvent('mesh_rebuild_error', error instanceof Error ? error.message : String(error));
+    }
+  }, [addOperatorEvent, refreshMesh]);
+
+  const applyColor = useCallback(async () => {
+    try {
+      await applyDogColorCalibration(colorCalibration);
+      addOperatorEvent('color_config', colorCalibration);
+    } catch (error) {
+      addOperatorEvent('color_config_error', error instanceof Error ? error.message : String(error));
+    }
+  }, [addOperatorEvent, colorCalibration]);
+
+  const clearLiveLidar = useCallback(() => {
+    setLidarData(null);
+    lidarRecordRef.current.frames = [];
+    setRecordedFrames(0);
+    addOperatorEvent('lidar_clear', 'mapa en vivo limpiado');
+  }, [addOperatorEvent]);
+
+  const toggleLidarRecording = useCallback(() => {
+    const rec = lidarRecordRef.current;
+    rec.recording = !rec.recording;
+    setRecordingLidar(rec.recording);
+    if (rec.recording) {
+      rec.frames = [];
+      rec.startedAt = Date.now();
+      setRecordedFrames(0);
+      addOperatorEvent('lidar_record', 'grabación iniciada');
+    } else {
+      setRecordedFrames(rec.frames.length);
+      addOperatorEvent('lidar_record', `grabación detenida · ${rec.frames.length} cuadros`);
+    }
+  }, [addOperatorEvent]);
+
+  const replayLidarRecording = useCallback(() => {
+    const frames = [...lidarRecordRef.current.frames];
+    if (!frames.length) return;
+    setLidarData(null);
+    addOperatorEvent('lidar_replay', `${frames.length} cuadros`);
+    const started = Date.now();
+    let index = 0;
+    const tick = () => {
+      const elapsed = Date.now() - started;
+      while (index < frames.length && frames[index].t <= elapsed) {
+        setLidarData({ points: frames[index].points, count: frames[index].count });
+        index += 1;
+      }
+      if (index < frames.length) setTimeout(tick, 30);
+    };
+    tick();
+  }, [addOperatorEvent]);
+
+  const exportLidarRecording = useCallback(() => {
+    if (Platform.OS !== 'web') {
+      addOperatorEvent('lidar_export', 'exportación disponible en web');
+      return;
+    }
+    const frames = lidarRecordRef.current.frames;
+    if (!frames.length) return;
+    const payload = JSON.stringify({
+      version: 1,
+      created_at: Date.now(),
+      frames: frames.map((frame) => ({
+        t: frame.t,
+        count: frame.count,
+        points: Array.from(frame.points),
+      })),
+    });
+    const blob = new Blob([payload], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `laika_lidar_${Date.now()}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    addOperatorEvent('lidar_export', `${frames.length} cuadros`);
+  }, [addOperatorEvent]);
+
+  const labelFace = useCallback(async (face: DogFace) => {
+    if (Platform.OS !== 'web') return;
+    const label = window.prompt('Nombre para esta persona:', face.label || '');
+    if (label === null) return;
+    const known = window.confirm('¿Marcar como conocida?');
+    try {
+      await updateDogFace(face.person_id, label, known);
+      await refreshFaces();
+      addOperatorEvent('face_label', { person_id: face.person_id, label, known });
+    } catch (error) {
+      addOperatorEvent('face_label_error', error instanceof Error ? error.message : String(error));
+    }
+  }, [addOperatorEvent, refreshFaces]);
+
+  const purgeFacesAction = useCallback(async () => {
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm('¿Borrar todas las caras capturadas?')
+      : true;
+    if (!confirmed) return;
+    try {
+      await purgeDogFaces();
+      await refreshFaces();
+      addOperatorEvent('faces_purged', 'ok');
+    } catch (error) {
+      addOperatorEvent('faces_purge_error', error instanceof Error ? error.message : String(error));
+    }
+  }, [addOperatorEvent, refreshFaces]);
+
   useEffect(() => {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
   }, []);
+
+  useEffect(() => {
+    mediaSettingsRef.current = mediaSettings;
+    networkProfileRef.current = networkProfile;
+  }, [mediaSettings, networkProfile]);
 
   useEffect(() => {
     getRobotStatus().then(setRobotStatus).catch(() => {});
@@ -314,7 +931,20 @@ export default function MisionScreen() {
 
   useEffect(() => {
     const disconnect = connectRobotWS({
-      onOpen: () => configureDogVisualStreams(true, true).catch(() => {}),
+      onOpen: () => {
+        addOperatorEvent('ws_open', 'robot conectado');
+        setMediaApplyStatus('aplicando media...');
+        configureDogMedia({
+          ...mediaSettingsRef.current,
+          profile: networkProfileRef.current,
+        })
+          .then(() => setMediaApplyStatus('media aplicada'))
+          .catch((error) => addOperatorEvent('media_config_error', error instanceof Error ? error.message : String(error)));
+        void refreshCapabilities();
+        void refreshMaps();
+        void refreshMesh();
+        void refreshFaces();
+      },
       onVideoFrame: (uri) => {
         const now = Date.now();
         if (now - lastVideoRef.current < 66) return;
@@ -326,21 +956,141 @@ export default function MisionScreen() {
         if (now - lastTelemetryRef.current < 500) return;
         lastTelemetryRef.current = now;
         setTelemetry(data);
+        const autonomy = (data.autonomy ?? {}) as any;
+        if (autonomy && typeof autonomy === 'object') {
+          setAutonomyInfo((prev) => ({
+            ...prev,
+            status: autonomy.enabled ? (autonomy.driving ? 'conduciendo' : 'activa') : prev.running ? prev.status : 'manual',
+          }));
+        }
       },
       onLidar: (points, count) => {
         const now = Date.now();
         if (now - lastLidarRef.current < 200) return;
         lastLidarRef.current = now;
         setLidarData({ points, count });
+        const rec = lidarRecordRef.current;
+        if (rec.recording) {
+          rec.frames.push({ t: now - rec.startedAt, points: points.slice(0), count });
+          if (rec.frames.length > 1200) rec.frames.shift();
+          setRecordedFrames(rec.frames.length);
+        }
       },
       onStatus: (connected) => {
         setMediaConnected(connected);
         if (!connected) setMediaError('sin señal robot');
         else setMediaError(null);
       },
+      onAutonomy: updateAutonomyFromMessage,
+      onMeshReady: (data) => {
+        setMeshStatus(`modelo nuevo disponible · ${Number(data.vertex_count || 0).toLocaleString()} vértices`);
+        addOperatorEvent('mesh_ready', data);
+      },
+      onCommandAck: (data) => {
+        const commandType = String(data.command_type ?? '');
+        if (commandType === 'set_speed_profile' && data.ok !== false) {
+          const profile = data.profile === 'max_api' ? 'max_api' : 'normal';
+          setSpeedProfile(profile);
+        }
+      },
+      onEvent: addOperatorEvent,
+      onAudio: () => {
+        addOperatorEvent('audio_packet', 'audio recibido');
+      },
+      onNetBytes: (stream, bytes) => {
+        const key = stream === 'lidar' ? 'lidar' : stream === 'audio' ? 'audio' : 'video';
+        netBytesRef.current[key] += bytes;
+      },
     });
     return disconnect;
-  }, []);
+  }, [addOperatorEvent, refreshCapabilities, refreshFaces, refreshMaps, refreshMesh, updateAutonomyFromMessage]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const bytes = netBytesRef.current;
+      setNetStats({
+        video: Math.round((bytes.video * 8) / 1000),
+        lidar: Math.round((bytes.lidar * 8) / 1000),
+        audio: Math.round((bytes.audio * 8) / 1000),
+        total: Math.round(((bytes.video + bytes.lidar + bytes.audio) * 8) / 1000),
+      });
+      netBytesRef.current = { video: 0, lidar: 0, audio: 0 };
+      if (mediaConnected) sendRobotHeartbeat();
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [mediaConnected]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const movementKeys = new Set([
+      'KeyW', 'KeyA', 'KeyS', 'KeyD',
+      'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight',
+      'KeyQ', 'KeyE', 'KeyZ', 'KeyC',
+      'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit6',
+      'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Numpad6',
+    ]);
+    const typingTarget = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null;
+      return !!el?.matches?.('input, textarea, select, [contenteditable="true"]');
+    };
+    let wasActive = false;
+    const sendKeys = () => {
+      const keys = keyStateRef.current;
+      const speed = currentSpeedPreset();
+      let x = 0, y = 0, z = 0;
+      if (['KeyW', 'ArrowUp', 'Digit2', 'Numpad2'].some((k) => keys.has(k))) x += speed.forward;
+      if (['KeyS', 'ArrowDown'].some((k) => keys.has(k))) x -= speed.reverse;
+      if (['KeyA', 'ArrowLeft', 'Digit1', 'Digit4', 'Numpad1', 'Numpad4'].some((k) => keys.has(k))) z += speed.angular;
+      if (['KeyD', 'ArrowRight', 'Digit3', 'Digit6', 'Numpad3', 'Numpad6'].some((k) => keys.has(k))) z -= speed.angular;
+      if (['KeyQ', 'KeyZ'].some((k) => keys.has(k))) y += speed.lateral;
+      if (['KeyE', 'KeyC'].some((k) => keys.has(k))) y -= speed.lateral;
+      if (x || y || z) {
+        if (!sendRobotDrive(x, y, z, 360)) moveRobotAxes(x, y, z, 360).catch(() => {});
+        wasActive = true;
+      } else {
+        if (wasActive) sendRobotDriveStop();
+        wasActive = false;
+      }
+      setRequestedMove({ x, y, z });
+    };
+    const down = (event: KeyboardEvent) => {
+      if (typingTarget(event.target)) return;
+      if (event.code === 'Space') {
+        event.preventDefault();
+        keyStateRef.current.clear();
+        sendRobotDriveStop();
+        emergencyStop().catch(() => {});
+        setRequestedMove({ x: 0, y: 0, z: 0 });
+        return;
+      }
+      if (!movementKeys.has(event.code)) return;
+      event.preventDefault();
+      keyStateRef.current.add(event.code);
+      sendKeys();
+    };
+    const up = (event: KeyboardEvent) => {
+      if (!movementKeys.has(event.code)) return;
+      event.preventDefault();
+      keyStateRef.current.delete(event.code);
+      sendKeys();
+    };
+    const blur = () => {
+      keyStateRef.current.clear();
+      sendRobotDriveStop();
+      wasActive = false;
+      setRequestedMove({ x: 0, y: 0, z: 0 });
+    };
+    const loop = setInterval(sendKeys, 90);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => {
+      clearInterval(loop);
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+    };
+  }, [currentSpeedPreset]);
 
 
   useEffect(() => {
@@ -353,7 +1103,7 @@ export default function MisionScreen() {
 
   const menuWidth = menuAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, s(400)],
+    outputRange: [0, s(520)],
   });
 
   // ── Helper para salir del split ──────────────────────────────────────────
@@ -370,7 +1120,7 @@ export default function MisionScreen() {
       useNativeDriver: false,
       listener: (event: any) => {
         const absX = event.nativeEvent.absoluteX;
-        const screenW = menuVisible ? width - s(400) : width;
+        const screenW = menuVisible ? width - s(520) : width;
         if (absX < screenW * 0.4) {
           setPreviewSide('left');
         } else if (absX > screenW * 0.6) {
@@ -388,7 +1138,7 @@ export default function MisionScreen() {
     }
     if (event.nativeEvent.state === State.END || event.nativeEvent.state === State.CANCELLED) {
       const absX = event.nativeEvent.absoluteX;
-      const screenW = menuVisible ? width - s(400) : width;
+      const screenW = menuVisible ? width - s(520) : width;
 
       if (absX < screenW * 0.4) {
         setSplitSide('left');
@@ -417,6 +1167,7 @@ export default function MisionScreen() {
   // ── Feed assignment ──────────────────────────────────────────────────────
   const cameraStatus = getFeedStatus(cameraFeed, 'CAM', mediaConnected, mediaError, Date.now());
   const lidarStatus = lidarData ? `LIDAR ${lidarData.count} pts` : mediaConnected ? 'LIDAR esperando' : 'LIDAR offline';
+  const safetyReadout = getSafetyReadout(telemetry);
 
   const CamView = useCallback(
     () => (
@@ -633,7 +1384,7 @@ export default function MisionScreen() {
                   <MaterialIcons name="auto-awesome" size={s(18)} color="#f23b3f" />
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => setMenuVisible(!menuVisible)} style={styles.buildingsButton}>
-                  <Text style={styles.buildingsButtonText}>BUILDINGS</Text>
+                  <Text style={styles.buildingsButtonText}>OPERATOR</Text>
                 </TouchableOpacity>
               </View>
           </View>
@@ -719,8 +1470,73 @@ export default function MisionScreen() {
               </TouchableOpacity>
               <View style={{ width: '100%', height: 1, backgroundColor: '#222', marginBottom: 12 }} />
 
+              {/* ── Conexión / media ── */}
+              <Text style={[styles.telemetryLine, { color: '#f23b3f', marginBottom: 4 }]}>CONEXIÓN / MEDIA</Text>
+              <View style={styles.operatorSection}>
+                <View style={styles.operatorRow}>
+                  <StatusBadge text={`API 10.40.5.4:8000`} mode="ok" />
+                  <StatusBadge text={mediaConnected ? 'WS conectado' : 'WS offline'} mode={mediaConnected ? 'ok' : 'err'} />
+                </View>
+                <View style={styles.operatorRow}>
+                  <StatusBadge text={`BW ${netStats.total} kbps`} mode={netStats.total > 0 ? 'ok' : 'muted'} />
+                  <StatusBadge text={`video ${netStats.video}`} />
+                  <StatusBadge text={`lidar ${netStats.lidar}`} />
+                  <StatusBadge text={`audio ${netStats.audio}`} />
+                </View>
+                <View style={styles.profileRow}>
+                  {(Object.keys(NETWORK_PROFILES) as NetworkProfileKey[]).map((profile) => (
+                    <TouchableOpacity
+                      key={profile}
+                      style={[styles.profileButton, networkProfile === profile && styles.profileButtonActive]}
+                      onPress={() => selectNetworkProfile(profile)}
+                    >
+                      <Text style={[styles.profileButtonText, networkProfile === profile && styles.profileButtonTextActive]}>
+                        {NETWORK_PROFILES[profile].label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View style={styles.operatorSwitchRow}>
+                  <Text style={styles.operatorSwitchLabel}>VIDEO</Text>
+                  <Switch
+                    value={mediaSettings.video}
+                    onValueChange={(video) => setMediaSettings((prev) => ({ ...prev, video }))}
+                    trackColor={{ false: '#333', true: 'rgba(242, 59, 63, 0.35)' }}
+                    thumbColor={mediaSettings.video ? '#f23b3f' : '#666'}
+                  />
+                  <Text style={styles.operatorSwitchLabel}>LIDAR</Text>
+                  <Switch
+                    value={mediaSettings.lidar}
+                    onValueChange={(lidar) => setMediaSettings((prev) => ({ ...prev, lidar }))}
+                    trackColor={{ false: '#333', true: 'rgba(242, 59, 63, 0.35)' }}
+                    thumbColor={mediaSettings.lidar ? '#f23b3f' : '#666'}
+                  />
+                  <Text style={styles.operatorSwitchLabel}>AUDIO</Text>
+                  <Switch
+                    value={mediaSettings.audio}
+                    onValueChange={(audio) => setMediaSettings((prev) => ({ ...prev, audio }))}
+                    trackColor={{ false: '#333', true: 'rgba(242, 59, 63, 0.35)' }}
+                    thumbColor={mediaSettings.audio ? '#f23b3f' : '#666'}
+                  />
+                </View>
+                <View style={styles.numberGrid}>
+                  <NumberField label="Cam FPS" value={mediaSettings.cameraFps} min={1} max={40} onChange={(cameraFps) => setMediaSettings((prev) => ({ ...prev, cameraFps }))} />
+                  <NumberField label="Calidad %" value={mediaSettings.cameraQuality} min={25} max={90} onChange={(cameraQuality) => setMediaSettings((prev) => ({ ...prev, cameraQuality }))} />
+                  <NumberField label="Ancho" value={mediaSettings.cameraWidth} min={320} max={1920} step={80} onChange={(cameraWidth) => setMediaSettings((prev) => ({ ...prev, cameraWidth }))} />
+                  <NumberField label="Bitrate" value={mediaSettings.cameraBitrateKbps} min={100} max={12000} step={100} onChange={(cameraBitrateKbps) => setMediaSettings((prev) => ({ ...prev, cameraBitrateKbps }))} />
+                </View>
+                <View style={styles.numberGrid}>
+                  <NumberField label="Audio every" value={mediaSettings.audioEmitEvery} min={1} max={10} onChange={(audioEmitEvery) => setMediaSettings((prev) => ({ ...prev, audioEmitEvery }))} />
+                  <NumberField label="Audio bytes" value={mediaSettings.audioMaxBytes} min={0} max={262144} step={4096} onChange={(audioMaxBytes) => setMediaSettings((prev) => ({ ...prev, audioMaxBytes }))} />
+                </View>
+                <View style={styles.operatorRow}>
+                  <OperatorButton label="APLICAR MEDIA" tone="ok" onPress={() => applyMediaSettings()} />
+                  <StatusBadge text={mediaApplyStatus} mode={mediaApplyStatus.includes('error') ? 'err' : 'ok'} />
+                </View>
+              </View>
+
               {/* ── Velocidad ── */}
-              <Text style={[styles.telemetryLine, { color: '#f23b3f', marginBottom: 4 }]}>VELOCIDAD</Text>
+              <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>VELOCIDAD / CONTROL</Text>
               <View style={styles.speedRow}>
                 <TouchableOpacity style={styles.speedBtn} onPress={() => setRobotSpeed(Math.max(10, robotSpeed - 10))}>
                   <Text style={styles.stopHudText}>−</Text>
@@ -733,34 +1549,144 @@ export default function MisionScreen() {
                 </TouchableOpacity>
                 <Text style={styles.speedValue}>{robotSpeed}%</Text>
               </View>
+              <View style={styles.operatorSection}>
+                <View style={styles.operatorRow}>
+                  <StatusBadge text={`perfil ${speedProfile}`} mode={speedProfile === 'max_api' ? 'warn' : 'ok'} />
+                  <StatusBadge text={`vx ${requestedMove.x.toFixed(2)} · vy ${requestedMove.y.toFixed(2)} · yaw ${requestedMove.z.toFixed(2)}`} />
+                </View>
+                <View style={styles.operatorRow}>
+                  <OperatorButton label="PERFIL NORMAL" onPress={() => requestSpeedMode('normal')} disabled={speedProfile === 'normal'} />
+                  <OperatorButton label="MÁXIMO API" tone="danger" onPress={() => requestSpeedMode('max_api')} disabled={speedProfile === 'max_api'} />
+                  <OperatorButton label="MODO MANUAL" onPress={() => sendDogCommand('enter_mode', { mode: 'normal' }).then(() => addOperatorEvent('manual_mode', 'normal')).catch((error) => addOperatorEvent('manual_mode_error', error instanceof Error ? error.message : String(error)))} />
+                </View>
+                <Text style={styles.operatorHint}>Teclado web: W/A/S/D, flechas, Q/E lateral, numpad 1/2/3/4/6 y Space para STOP.</Text>
+              </View>
 
               {/* ── Navegación autónoma ── */}
               <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>NAVEGACIÓN AUTÓNOMA</Text>
-              <View style={styles.autoRow}>
-                <TouchableOpacity
-                  style={[styles.autoBtn, autoMode && { backgroundColor: 'rgba(69,212,131,0.25)' }]}
-                  onPress={() => {
-                    if (autoMode) return;
-                    setAutoMode(true);
-                    autonomousStart().catch(() => setAutoMode(false));
-                  }}
-                >
-                  <Text style={styles.autoBtnText}>▶ EXPLORAR</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.autoBtn, styles.autoBtnStop]}
-                  onPress={() => { setAutoMode(false); autonomousStop().catch(() => {}); }}
-                >
-                  <Text style={[styles.autoBtnText, styles.autoBtnTextStop]}>⏹ DETENER</Text>
-                </TouchableOpacity>
+              <View style={styles.operatorSection}>
+                <View style={styles.operatorRow}>
+                  <OperatorButton label="EXPLORAR" tone="ok" onPress={() => runAutonomyAction('start')} disabled={autoMode} />
+                  <OperatorButton label="DETENER" tone="warn" onPress={() => runAutonomyAction('stop')} />
+                  <OperatorButton label="PARADA" tone="danger" onPress={() => { setAutoMode(false); runAutonomyAction('estop'); emergencyStop().catch(() => {}); }} />
+                </View>
+                <View style={styles.operatorRow}>
+                  <StatusBadge text={`estado ${autonomyInfo.status}`} mode={autonomyInfo.running ? 'ok' : 'muted'} />
+                  <StatusBadge text={`cobertura ${autonomyInfo.coverage == null ? '--' : `${Math.round(autonomyInfo.coverage * 100)}%`}`} />
+                  <StatusBadge text={`capturas ${autonomyInfo.captures}`} />
+                </View>
+                <View style={styles.operatorRow}>
+                  <StatusBadge text={`meta ${autonomyInfo.goal ?? '--'}`} />
+                  <OperatorButton label={greeterOn ? 'SALUDO ON' : 'SALUDO OFF'} onPress={toggleGreeter} />
+                  <OperatorButton label="PROBAR SALUDO" onPress={() => testDogGreeting().then(() => setGreeterStatus('saludo enviado')).catch(() => setGreeterStatus('saludo: error'))} />
+                </View>
+                <StatusBadge text={greeterStatus} mode={greeterStatus.includes('error') ? 'err' : greeterStatus.includes('listo') ? 'ok' : 'muted'} />
               </View>
-              <TouchableOpacity
-                style={[styles.autoBtn, styles.autoBtnEmergency, { marginTop: 6 }]}
-                onPress={() => { setAutoMode(false); emergencyStop().catch(() => {}); }}
-              >
-                <Text style={[styles.autoBtnText, styles.autoBtnTextEmergency]}>⛔ PARADA EMERGENCIA</Text>
-              </TouchableOpacity>
-              {autoMode && <Text style={[styles.autoBtnText, { marginTop: 6 }]}>● autonomía activa</Text>}
+
+              {/* ── Seguridad ── */}
+              <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>SEGURIDAD ANTI-CHOQUE</Text>
+              <View style={styles.operatorSection}>
+                <View style={styles.operatorRow}>
+                  <StatusBadge text={`guard ${safetyReadout.guard}`} mode={safetyReadout.guardOk ? 'ok' : 'warn'} />
+                  <StatusBadge text={`frente ${safetyReadout.front}`} mode={safetyReadout.frontDanger ? 'err' : 'muted'} />
+                  <StatusBadge text={`borde ${safetyReadout.cliff}`} mode={safetyReadout.cliffDanger ? 'err' : 'ok'} />
+                </View>
+                <StatusBadge text={`L/R/atrás ${safetyReadout.sides}`} />
+                <StatusBadge text={`última intervención ${safetyReadout.last}`} />
+              </View>
+
+              {/* ── Color LiDAR ── */}
+              <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>COLOR DE CÁMARA EN LIDAR</Text>
+              <View style={styles.operatorSection}>
+                <View style={styles.operatorSwitchRow}>
+                  <Text style={styles.operatorSwitchLabel}>COLORIZAR</Text>
+                  <Switch
+                    value={colorCalibration.enabled}
+                    onValueChange={(enabled) => setColorCalibration((prev) => ({ ...prev, enabled }))}
+                    trackColor={{ false: '#333', true: 'rgba(242, 59, 63, 0.35)' }}
+                    thumbColor={colorCalibration.enabled ? '#f23b3f' : '#666'}
+                  />
+                </View>
+                <View style={styles.numberGrid}>
+                  <NumberField label="FOV" value={colorCalibration.fovDeg} min={60} max={210} onChange={(fovDeg) => setColorCalibration((prev) => ({ ...prev, fovDeg }))} />
+                  <NumberField label="Pitch" value={colorCalibration.pitchDeg} min={-45} max={45} onChange={(pitchDeg) => setColorCalibration((prev) => ({ ...prev, pitchDeg }))} />
+                  <NumberField label="Altura" value={colorCalibration.heightM} min={-0.5} max={1.5} step={0.05} decimals={2} onChange={(heightM) => setColorCalibration((prev) => ({ ...prev, heightM }))} />
+                  <NumberField label="Adelante" value={colorCalibration.forwardM} min={-0.5} max={1.5} step={0.05} decimals={2} onChange={(forwardM) => setColorCalibration((prev) => ({ ...prev, forwardM }))} />
+                </View>
+                <OperatorButton label="APLICAR COLOR" tone="ok" onPress={applyColor} />
+              </View>
+
+              {/* ── Lidar sesión ── */}
+              <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>LIDAR EN VIVO / SESIÓN</Text>
+              <View style={styles.operatorSection}>
+                <View style={styles.operatorRow}>
+                  <StatusBadge text={lidarData ? `${lidarData.count.toLocaleString()} pts` : 'sin nube'} mode={lidarData ? 'ok' : 'muted'} />
+                  <StatusBadge text={`${recordedFrames} cuadros grabados`} mode={recordingLidar ? 'warn' : 'muted'} />
+                </View>
+                <View style={styles.operatorRow}>
+                  <OperatorButton label="LIMPIAR" onPress={clearLiveLidar} />
+                  <OperatorButton label={recordingLidar ? 'DETENER REC' : 'GRABAR'} tone={recordingLidar ? 'warn' : 'default'} onPress={toggleLidarRecording} />
+                  <OperatorButton label="REPLAY" onPress={replayLidarRecording} disabled={!recordedFrames} />
+                  <OperatorButton label="EXPORTAR" onPress={exportLidarRecording} disabled={!recordedFrames} />
+                </View>
+              </View>
+
+              {/* ── Mapas / malla ── */}
+              <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>BIBLIOTECA DE MAPAS / MODELO 3D</Text>
+              <View style={styles.operatorSection}>
+                <View style={styles.operatorRow}>
+                  <OperatorButton label="ACTUALIZAR" onPress={refreshMaps} />
+                  <OperatorButton label="SNAPSHOT" tone="ok" onPress={saveSnapshot} />
+                  <OperatorButton label="ABRIR MAPA" onPress={openSelectedMap} disabled={!selectedMapId} />
+                </View>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: s(6), paddingVertical: s(4) }}>
+                  {maps.length ? maps.map((map) => (
+                    <TouchableOpacity
+                      key={map.map_id}
+                      style={[styles.mapChoice, selectedMapId === map.map_id && styles.mapChoiceActive]}
+                      onPress={() => setSelectedMapId(map.map_id)}
+                    >
+                      <Text style={[styles.mapChoiceText, selectedMapId === map.map_id && styles.mapChoiceTextActive]}>
+                        {formatDogMapLabel(map)}
+                      </Text>
+                    </TouchableOpacity>
+                  )) : (
+                    <Text style={styles.operatorHint}>sin mapas consultados</Text>
+                  )}
+                </ScrollView>
+                <StatusBadge text={mapStatus} mode={mapStatus.includes('error') ? 'err' : loadedMap ? 'ok' : 'muted'} />
+                <MapPreview map={loadedMap} />
+                <View style={styles.operatorRow}>
+                  <OperatorButton label="CARGAR MODELO" onPress={refreshMesh} />
+                  <OperatorButton label="RECONSTRUIR" tone="warn" onPress={rebuildMesh} />
+                </View>
+                <StatusBadge
+                  text={meshSummary ? `${meshSummary.vertexCount.toLocaleString()} vértices · ${meshSummary.faceCount.toLocaleString()} caras` : meshStatus}
+                  mode={meshStatus.includes('error') ? 'err' : meshSummary ? 'ok' : 'muted'}
+                />
+              </View>
+
+              {/* ── Caras ── */}
+              <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>CARAS CAPTURADAS</Text>
+              <View style={styles.operatorSection}>
+                <View style={styles.operatorRow}>
+                  <OperatorButton label="ACTUALIZAR" onPress={refreshFaces} />
+                  <OperatorButton label="BORRAR TODAS" tone="danger" onPress={purgeFacesAction} />
+                </View>
+                <StatusBadge text={perceptionStatus} mode={perceptionStatus.includes('ON') ? 'ok' : 'warn'} />
+                <StatusBadge text={facesStatus} mode={faces.length ? 'ok' : 'muted'} />
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: s(8), paddingTop: s(8) }}>
+                  {faces.length ? faces.map((face) => (
+                    <TouchableOpacity key={face.person_id} style={styles.faceCard} onPress={() => labelFace(face)}>
+                      <Image source={{ uri: dogFaceImageUrl(face.person_id) }} style={styles.faceImage} resizeMode="cover" />
+                      <Text style={styles.faceLabel} numberOfLines={1}>{face.label || face.person_id}</Text>
+                      <Text style={styles.faceMeta}>{face.known ? 'conocida' : 'nueva'} · {face.captures ?? 0}</Text>
+                    </TouchableOpacity>
+                  )) : (
+                    <Text style={styles.operatorHint}>sin caras capturadas</Text>
+                  )}
+                </ScrollView>
+              </View>
 
               {/* ── Telemetría ── */}
               <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>TELEMETRÍA</Text>
@@ -771,6 +1697,18 @@ export default function MisionScreen() {
                   ))
                 ) : (
                   <Text style={styles.telemetryLine}>sin datos — conectando…</Text>
+                )}
+              </View>
+
+              {/* ── Eventos ── */}
+              <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>EVENTOS / ACK / PREDICCIONES</Text>
+              <View style={styles.telemetryBox}>
+                {operatorEvents.length ? operatorEvents.slice(0, 18).map((event) => (
+                  <Text key={event.id} style={styles.telemetryLine}>
+                    <Text style={{ color: '#6f5a5a' }}>{event.ts}</Text> {event.type}: {stringifyShort(event.data)}
+                  </Text>
+                )) : (
+                  <Text style={styles.telemetryLine}>sin eventos todavía</Text>
                 )}
               </View>
 

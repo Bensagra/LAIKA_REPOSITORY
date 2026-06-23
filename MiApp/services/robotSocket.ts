@@ -1,11 +1,23 @@
 import { inflate } from 'pako';
-import { DOG_API_URL, DOG_TOKEN } from './api';
+import { DOG_API_URL, DOG_ROBOT_ID, DOG_TOKEN } from './api';
 
 export type VideoFrameCallback = (dataUri: string) => void;
 export type TelemetryCallback = (data: Record<string, unknown>) => void;
 export type StatusCallback = (connected: boolean) => void;
-export type LidarCallback = (points: Float32Array, count: number) => void;
+export type LidarFrameMeta = {
+  header: Record<string, unknown>;
+  colors: Uint8Array | null;
+  receivedAt: number;
+  byteLength: number;
+};
+export type LidarCallback = (points: Float32Array, count: number, meta?: LidarFrameMeta) => void;
 export type OnOpenCallback = () => void;
+export type RobotEventCallback = (type: string, data: unknown) => void;
+export type AutonomyCallback = (message: Record<string, any>) => void;
+export type MeshReadyCallback = (data: Record<string, unknown>) => void;
+export type CommandAckCallback = (data: Record<string, unknown>) => void;
+export type AudioCallback = (data: Record<string, unknown>) => void;
+export type NetBytesCallback = (stream: string, bytes: number) => void;
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -16,6 +28,12 @@ let cbTelemetry: TelemetryCallback | null = null;
 let cbStatus: StatusCallback | null = null;
 let cbLidar: LidarCallback | null = null;
 let cbOpen: OnOpenCallback | null = null;
+let cbEvent: RobotEventCallback | null = null;
+let cbAutonomy: AutonomyCallback | null = null;
+let cbMeshReady: MeshReadyCallback | null = null;
+let cbCommandAck: CommandAckCallback | null = null;
+let cbAudio: AudioCallback | null = null;
+let cbNetBytes: NetBytesCallback | null = null;
 
 function uint8ToBase64(bytes: Uint8Array): string {
   const chunk = 8192;
@@ -38,29 +56,39 @@ function i16ToPoints(raw: Uint8Array, count: number, scale: number, offset: numb
   return out;
 }
 
-function parseLidar(header: Record<string, unknown>, payload: Uint8Array): void {
+function parseLidar(header: Record<string, unknown>, payload: Uint8Array, frameByteLength: number): void {
   try {
     const fmt = String(header.fmt ?? 'i16_xyz_zlib');
     const count = Number(header.count ?? 0);
     const scale = Number(header.scale ?? 0.001);
     const offset = (header.offset as number[]) ?? [0, 0, 0];
+    const emit = (points: Float32Array, colors: Uint8Array | null = null) => {
+      cbLidar?.(points, count, {
+        header,
+        colors,
+        receivedAt: Date.now(),
+        byteLength: frameByteLength,
+      });
+    };
 
     if (fmt === 'i16_xyz_zlib') {
       const raw = inflate(payload);
       const points = i16ToPoints(raw, count, scale, offset);
-      cbLidar?.(points, count);
+      emit(points);
     } else if (fmt === 'f32_xyz_zlib') {
       const raw = inflate(payload);
       const buf = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
-      cbLidar?.(new Float32Array(buf), count);
+      emit(new Float32Array(buf));
     } else if (fmt === 'i16_xyz_rgb_zlib') {
       if (payload.byteLength < 4) return;
       const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
       const geomLen = dv.getUint32(0, true);
       if (4 + geomLen > payload.byteLength) return;
       const raw = inflate(payload.subarray(4, 4 + geomLen));
+      const colorPayload = payload.subarray(4 + geomLen);
+      const colors = colorPayload.byteLength ? inflate(colorPayload) : null;
       const points = i16ToPoints(raw, count, scale, offset);
-      cbLidar?.(points, count);
+      emit(points, colors);
     }
   } catch { /* ignore bad frames */ }
 }
@@ -80,6 +108,7 @@ function parseFrame(buffer: ArrayBuffer): void {
 
   const stream = String(header.stream ?? '');
   const payload = new Uint8Array(buffer, 6 + headerLen);
+  cbNetBytes?.(stream, buffer.byteLength);
 
   if (stream === 'video') {
     const fmt = String(header.image_format ?? '');
@@ -90,7 +119,7 @@ function parseFrame(buffer: ArrayBuffer): void {
   }
 
   if (stream === 'lidar') {
-    parseLidar(header, payload);
+    parseLidar(header, payload, buffer.byteLength);
   }
 }
 
@@ -105,8 +134,7 @@ function handleMessage(data: unknown): void {
     if (data.startsWith('{') || data.startsWith('[')) {
       try {
         const msg = JSON.parse(data);
-        const tel = msg?.telemetry ?? (msg?.type === 'telemetry' ? msg : null);
-        if (tel) cbTelemetry?.(tel as Record<string, unknown>);
+        handleJsonMessage(msg);
       } catch { /* ignore */ }
       return;
     }
@@ -115,6 +143,49 @@ function handleMessage(data: unknown): void {
       const bin = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
       parseFrame(bin.buffer);
     } catch { /* ignore */ }
+  }
+}
+
+function handleJsonMessage(msg: any): void {
+  const type = String(msg?.type ?? '');
+  const robotId = msg?.robot_id ? String(msg.robot_id) : '';
+  if (robotId && robotId !== DOG_ROBOT_ID) return;
+
+  if (type === 'telemetry' || msg?.telemetry) {
+    cbTelemetry?.((msg.data ?? msg.telemetry ?? msg) as Record<string, unknown>);
+    return;
+  }
+
+  if (type === 'autonomy') {
+    cbAutonomy?.(msg as Record<string, any>);
+    cbEvent?.('autonomy', msg.data ?? msg);
+    return;
+  }
+
+  if (type === 'media') {
+    const stream = String(msg.stream ?? '');
+    if (stream === 'audio') {
+      const payload = (msg.data ?? {}) as Record<string, unknown>;
+      cbNetBytes?.('audio', JSON.stringify(payload).length);
+      cbAudio?.(payload);
+    }
+    return;
+  }
+
+  if (type === 'mesh_ready') {
+    cbMeshReady?.((msg.data ?? {}) as Record<string, unknown>);
+    cbEvent?.('mesh_ready', msg.data ?? msg);
+    return;
+  }
+
+  if (type === 'command_ack') {
+    cbCommandAck?.((msg.data ?? {}) as Record<string, unknown>);
+    cbEvent?.(type, msg.data ?? msg);
+    return;
+  }
+
+  if (type === 'event' || type === 'prediction' || type === 'command_out' || type === 'speed_profile_status') {
+    cbEvent?.(type, msg.data ?? msg);
   }
 }
 
@@ -163,6 +234,12 @@ export function connectRobotWS(opts: {
   onStatus?: StatusCallback;
   onLidar?: LidarCallback;
   onOpen?: OnOpenCallback;
+  onEvent?: RobotEventCallback;
+  onAutonomy?: AutonomyCallback;
+  onMeshReady?: MeshReadyCallback;
+  onCommandAck?: CommandAckCallback;
+  onAudio?: AudioCallback;
+  onNetBytes?: NetBytesCallback;
 }): () => void {
   const gen = ++currentGen;
   cbVideo = opts.onVideoFrame ?? null;
@@ -170,6 +247,12 @@ export function connectRobotWS(opts: {
   cbStatus = opts.onStatus ?? null;
   cbLidar = opts.onLidar ?? null;
   cbOpen = opts.onOpen ?? null;
+  cbEvent = opts.onEvent ?? null;
+  cbAutonomy = opts.onAutonomy ?? null;
+  cbMeshReady = opts.onMeshReady ?? null;
+  cbCommandAck = opts.onCommandAck ?? null;
+  cbAudio = opts.onAudio ?? null;
+  cbNetBytes = opts.onNetBytes ?? null;
 
   doConnect(gen);
 
@@ -183,5 +266,53 @@ export function connectRobotWS(opts: {
     cbStatus = null;
     cbLidar = null;
     cbOpen = null;
+    cbEvent = null;
+    cbAutonomy = null;
+    cbMeshReady = null;
+    cbCommandAck = null;
+    cbAudio = null;
+    cbNetBytes = null;
   };
+}
+
+export function sendRobotWsMessage(message: Record<string, unknown>): boolean {
+  if (!ws || ws.readyState !== WebSocket.OPEN || ws.bufferedAmount > 64 * 1024) return false;
+  ws.send(JSON.stringify(message));
+  return true;
+}
+
+export function sendRobotDrive(linearX: number, lateralY: number, angularZ: number, durationMs = 320): boolean {
+  return sendRobotWsMessage({
+    op: 'drive',
+    robot_id: DOG_ROBOT_ID,
+    payload: {
+      linear_x: linearX,
+      linear_y: lateralY,
+      lateral_y: lateralY,
+      angular_z: angularZ,
+      duration_ms: durationMs,
+    },
+  });
+}
+
+export function sendRobotDriveStop(): boolean {
+  return sendRobotWsMessage({
+    op: 'drive_stop',
+    robot_id: DOG_ROBOT_ID,
+  });
+}
+
+export function sendRobotHeartbeat(): boolean {
+  return sendRobotWsMessage({
+    op: 'heartbeat',
+    robot_id: DOG_ROBOT_ID,
+  });
+}
+
+export function requestRobotSpeedProfile(profile: 'normal' | 'max_api'): boolean {
+  return sendRobotWsMessage({
+    op: 'set_speed_profile',
+    robot_id: DOG_ROBOT_ID,
+    profile,
+  });
 }

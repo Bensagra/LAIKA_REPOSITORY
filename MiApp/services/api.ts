@@ -39,7 +39,7 @@ async function fetchDog(path: string, options: RequestInit = {}) {
   return res;
 }
 
-async function activateDogControl() {
+export async function activateDogControl() {
   await fetchDog(`/api/robots/${DOG_ROBOT_ID}/control/activate`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${DOG_TOKEN}` },
@@ -77,11 +77,20 @@ export async function configureDogVisualStreams(cameraEnabled = true, lidarEnabl
   await sendDogCommand('set_camera_stream', {
     enabled: cameraEnabled,
     emit_every: 1,
-    jpeg_quality: 80,
+    format: 'webp',
+    target_fps: 12,
+    jpeg_quality: 70,
+    max_width: 960,
+    bitrate_kbps: 900,
+  }, 2000);
+  await sendDogCommand('set_lidar_decoder', {
+    decoder: 'native',
   }, 2000);
   await sendDogCommand('set_lidar', {
     enabled: lidarEnabled,
     subscribe: true,
+    media_hz: 2,
+    max_points: 8000,
   }, 2000);
 }
 
@@ -108,13 +117,13 @@ export async function moveRobot(
   }
   await activateDogControl();
   const spd = Math.max(0.1, Math.min(1, speedFactor));
-  const payloadByDirection: Record<string, object> = {
+  const payloadByDirection: Record<string, Record<string, unknown>> = {
     forward:  { linear_x:  3.5 * spd, linear_y: 0, angular_z: 0,         duration_ms: 520 },
     backward: { linear_x: -2.3 * spd, linear_y: 0, angular_z: 0,         duration_ms: 520 },
     left:     { linear_x: 0,          linear_y: 0, angular_z:  3.68 * spd, duration_ms: 460 },
     right:    { linear_x: 0,          linear_y: 0, angular_z: -3.68 * spd, duration_ms: 460 },
-    strafeL:  { linear_x: 0,          linear_y:  0.92 * spd, angular_z: 0, duration_ms: 460 },
-    strafeR:  { linear_x: 0,          linear_y: -0.92 * spd, angular_z: 0, duration_ms: 460 },
+    strafeL:  { linear_x: 0, linear_y:  0.92 * spd, lateral_y:  0.92 * spd, angular_z: 0, duration_ms: 460 },
+    strafeR:  { linear_x: 0, linear_y: -0.92 * spd, lateral_y: -0.92 * spd, angular_z: 0, duration_ms: 460 },
   };
   await sendDogCommand('move', payloadByDirection[direction]);
 }
@@ -130,7 +139,13 @@ export async function moveRobotAxes(
     return;
   }
   await activateDogControl();
-  await sendDogCommand('move', { linear_x: linearX, linear_y: linearY, angular_z: angularZ, duration_ms: durationMs });
+  await sendDogCommand('move', {
+    linear_x: linearX,
+    linear_y: linearY,
+    lateral_y: linearY,
+    angular_z: angularZ,
+    duration_ms: durationMs,
+  });
 }
 
 export async function emergencyStop(): Promise<void> {
@@ -139,11 +154,25 @@ export async function emergencyStop(): Promise<void> {
 
 export async function autonomousStart(): Promise<void> {
   await activateDogControl();
-  await sendDogCommand('autonomous_start', { mode: 'explore' }, 3000);
+  try {
+    await fetchDog(`/api/robots/${DOG_ROBOT_ID}/autonomy`, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'start' }),
+    });
+  } catch {
+    await sendDogCommand('autonomous_start', { mode: 'explore' }, 3000);
+  }
 }
 
 export async function autonomousStop(): Promise<void> {
-  await sendDogCommand('autonomous_stop', {}, 2000).catch(() => {});
+  try {
+    await fetchDog(`/api/robots/${DOG_ROBOT_ID}/autonomy`, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'stop' }),
+    });
+  } catch {
+    await sendDogCommand('autonomous_stop', {}, 2000).catch(() => {});
+  }
 }
 
 export async function registerUser(gmail: string, contrasena: string): Promise<void> {

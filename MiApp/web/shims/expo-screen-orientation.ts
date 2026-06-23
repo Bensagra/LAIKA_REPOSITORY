@@ -3,7 +3,8 @@ export enum OrientationLock {
 }
 
 export async function lockAsync() {
-  if (document.fullscreenElement && screen.orientation?.lock) {
-    await screen.orientation.lock('landscape').catch(() => undefined);
+  const orientation = screen.orientation as ScreenOrientation & { lock?: (orientation: string) => Promise<void> };
+  if (document.fullscreenElement && orientation?.lock) {
+    await orientation.lock('landscape').catch(() => undefined);
   }
 }

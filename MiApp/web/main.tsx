@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { createRoot } from 'react-dom/client';
 import { AppRegistry } from 'react-native';
 import HomeScreen from '../app';
 import MisionScreen from '../app/mision';
+import { AppSettingsProvider } from '../contexts/AppSettings';
 
 import './styles.css';
 
@@ -27,7 +27,15 @@ function WebApp() {
   return route === '/mision' ? <MisionScreen /> : <HomeScreen />;
 }
 
-AppRegistry.registerComponent('laikAI', () => WebApp);
+function WebRoot() {
+  return (
+    <AppSettingsProvider>
+      <WebApp />
+    </AppSettingsProvider>
+  );
+}
+
+AppRegistry.registerComponent('laikAI', () => WebRoot);
 
 const rootTag = document.getElementById('root');
 

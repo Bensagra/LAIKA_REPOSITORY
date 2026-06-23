@@ -23,8 +23,16 @@ export default defineConfig({
         replacement: path.resolve(__dirname, 'web/shims/expo-screen-orientation.ts'),
       },
       {
+        find: 'expo-image-picker',
+        replacement: path.resolve(__dirname, 'web/shims/expo-image-picker.ts'),
+      },
+      {
         find: '@expo/vector-icons/MaterialIcons',
         replacement: path.resolve(__dirname, 'web/shims/material-icons.tsx'),
+      },
+      {
+        find: 'react-native-svg',
+        replacement: path.resolve(__dirname, 'web/shims/react-native-svg.tsx'),
       },
     ],
   },
