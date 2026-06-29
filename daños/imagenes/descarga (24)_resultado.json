@@ -1,0 +1,34 @@
+{
+  "imagen": "descarga (24).jpeg",
+  "fecha": "2026-05-12T15:49:12.216Z",
+  "tiene_daños": true,
+  "nivel_severidad_general": 7,
+  "grado_general": "Daño grave, requiere reparación urgente",
+  "daños_detectados": [
+    {
+      "tipo": "grietas",
+      "severidad": 8,
+      "grado": "Daño grave, requiere reparación urgente",
+      "descripcion": "Grietas horizontales y verticales en la pared, algunas de ellas profundas y largas"
+    },
+    {
+      "tipo": "desgaste",
+      "severidad": 6,
+      "grado": "Daño moderado, requiere reparación a corto plazo",
+      "descripcion": "Desgaste del revoque y pintura en la pared, con exposición de ladrillos"
+    },
+    {
+      "tipo": "humedad",
+      "severidad": 5,
+      "grado": "Daño moderado, requiere reparación a corto plazo",
+      "descripcion": "Manchas de humedad y salitre en la pared, especialmente en la parte inferior"
+    },
+    {
+      "tipo": "parte faltante",
+      "severidad": 4,
+      "grado": "Daño leve, requiere mantenimiento preventivo",
+      "descripcion": "Partes del revoque y ladrillos faltantes en la pared"
+    }
+  ],
+  "resumen": "La estructura presenta daños significativos, incluyendo grietas, desgaste, humedad y partes faltantes, lo que indica un estado de conservación deficiente que requiere reparaciones urgentes."
+}

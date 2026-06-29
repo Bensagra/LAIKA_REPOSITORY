@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p \"/Users/juliymoru/.claude/projects/-Users-juliymoru-Documents-Proyecto-2026/memory\")"
+    ],
+    "additionalDirectories": [
+      "/Users/juliymoru/.claude/projects/-Users-juliymoru-Documents-Proyecto-2026/memory"
+    ]
+  }
+}

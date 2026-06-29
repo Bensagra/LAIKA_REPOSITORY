@@ -1,0 +1,34 @@
+{
+  "imagen": "descarga (23).jpeg",
+  "fecha": "2026-05-12T15:49:12.304Z",
+  "tiene_daños": true,
+  "nivel_severidad_general": 8,
+  "grado_general": "Daño grave, requiere reparación urgente",
+  "daños_detectados": [
+    {
+      "tipo": "rotura",
+      "severidad": 9,
+      "grado": "Daño catastrófico",
+      "descripcion": "Roturas en múltiples niveles de la estructura, con pérdida de material y exposición de armaduras"
+    },
+    {
+      "tipo": "deformación",
+      "severidad": 8,
+      "grado": "Daño grave",
+      "descripcion": "Deformación en varias columnas y vigas, indicando posible riesgo estructural"
+    },
+    {
+      "tipo": "parte faltante",
+      "severidad": 7,
+      "grado": "Daño grave",
+      "descripcion": "Partes del revestimiento exterior y ventanas faltantes, exposición a los elementos"
+    },
+    {
+      "tipo": "corrosión",
+      "severidad": 6,
+      "grado": "Daño moderado",
+      "descripcion": "Signos de corrosión en elementos metálicos expuestos"
+    }
+  ],
+  "resumen": "La estructura presenta daños graves y generalizados, con roturas, deformaciones y partes faltantes. La corrosión es evidente en elementos metálicos expuestos. El estado es crítico, requiriendo intervención urgente para evitar mayores daños o colapso."
+}

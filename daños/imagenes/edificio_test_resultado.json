@@ -1,0 +1,22 @@
+{
+  "imagen": "edificio_test.jpg",
+  "fecha": "2026-05-12T15:49:12.300Z",
+  "tiene_daños": true,
+  "nivel_severidad_general": 3,
+  "grado_general": "Daño leve, requiere mantenimiento preventivo",
+  "daños_detectados": [
+    {
+      "tipo": "desgaste",
+      "severidad": 3,
+      "grado": "Daño leve, requiere mantenimiento preventivo",
+      "descripcion": "Pintura desgastada y sucia"
+    },
+    {
+      "tipo": "humedad",
+      "severidad": 2,
+      "grado": "Daño mínimo, estético, no afecta la estructura",
+      "descripcion": "Manchas de humedad en la superficie"
+    }
+  ],
+  "resumen": "La imagen muestra un letrero con una cámara de seguridad pintada, que presenta desgaste en la pintura y algunas manchas de humedad. No presenta daños estructurales significativos."
+}

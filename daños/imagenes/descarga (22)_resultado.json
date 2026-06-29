@@ -1,0 +1,22 @@
+{
+  "imagen": "descarga (22).jpeg",
+  "fecha": "2026-05-12T15:49:11.963Z",
+  "tiene_daños": true,
+  "nivel_severidad_general": 6,
+  "grado_general": "Daño moderado, requiere reparación a corto plazo",
+  "daños_detectados": [
+    {
+      "tipo": "grietas",
+      "severidad": 6,
+      "grado": "Daño moderado, requiere reparación a corto plazo",
+      "descripcion": "Grietas visibles en la fachada, especialmente en las áreas de las ventanas y balcones"
+    },
+    {
+      "tipo": "desgaste",
+      "severidad": 4,
+      "grado": "Daño leve, requiere mantenimiento preventivo",
+      "descripcion": "Signos de desgaste en las barandillas de los balcones y ventanas"
+    }
+  ],
+  "resumen": "La estructura presenta daños moderados, principalmente grietas en la fachada y desgaste en elementos metálicos, lo que sugiere necesidad de reparaciones a corto plazo para evitar progresión de daños."
+}
