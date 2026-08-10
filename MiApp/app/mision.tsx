@@ -27,7 +27,6 @@ import {
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import * as ScreenOrientation from 'expo-screen-orientation';
 
-// Importación de estilos
 import { styles } from '../styles/misionStyles';
 import { s } from '../utils/scale';
 import { useAppSettings } from '../contexts/AppSettings';
@@ -279,10 +278,6 @@ const MapPreview = ({ map }: { map: LoadedDogMap | null }) => {
   );
 };
 
-// ─── Joysticks en pantalla ────────────────────────────────────────────────────
-// Igual que el operator console: cada stick sólo escribe su valor normalizado
-// (-1..1) en este estado compartido; el loop de control único combina ambos
-// (izq = trasladar, der = girar) + teclado y manda UN solo `drive` por WebSocket.
 const joystickState = { left: { x: 0, y: 0 }, right: { x: 0, y: 0 } };
 
 function makeJoystick(which: 'left' | 'right') {
@@ -321,11 +316,9 @@ function makeJoystick(which: 'left' | 'right') {
   };
 }
 
-// Izquierdo: trasladar (adelante/atrás + lateral). Derecho: girar (yaw).
 const JoystickLeft = makeJoystick('left');
 const JoystickRight = makeJoystick('right');
 
-// ─── D-Pad component ──────────────────────────────────────────────────────────
 const DPad = () => {
   const { robotSpeed } = useAppSettings();
   const spd = robotSpeed / 100;
@@ -356,7 +349,6 @@ const DPad = () => {
   );
 };
 
-// ─── LiDAR 2D top-down view ───────────────────────────────────────────────────
 const LidarMapView = React.memo(({
   points,
   count,
@@ -411,7 +403,6 @@ const LidarMapView = React.memo(({
 });
 LidarMapView.displayName = 'LidarMapView';
 
-// ─── Placeholder views ────────────────────────────────────────────────────────
 const LiveFeed = ({
   feed,
   label,
@@ -437,7 +428,6 @@ const LiveFeed = ({
   </View>
 );
 
-// ─── Cámara: en web usa un <canvas> (decodifica H.264/WebCodecs); en nativo el <Image> webp ──
 const CameraFeed = ({
   feed,
   label,
@@ -482,7 +472,6 @@ const CameraFeed = ({
   );
 };
 
-// ─── Main Component ───────────────────────────────────────────────────────────
 function getFeedStatus(
   feed: VisualFeedState,
   label: string,
@@ -965,8 +954,7 @@ export default function MisionScreen() {
         setCameraFeed({ uri, lastFrameAt: now });
       },
       onVideoTick: () => {
-        // H.264 se dibuja directo en el canvas y no genera URI: sólo marcamos
-        // que llegó un cuadro para que el estado pase a "CAM live".
+
         const now = Date.now();
         if (now - lastVideoRef.current < 200) return;
         lastVideoRef.current = now;
@@ -1055,8 +1043,7 @@ export default function MisionScreen() {
     };
     let wasActive = false;
     let lastSig = '';
-    // Combina teclado + ambos joysticks en un único vector de movimiento y lo
-    // manda por WebSocket (drive continuo). Izq = trasladar, der = girar.
+
     const sendDrive = () => {
       const keys = keyStateRef.current;
       const speed = currentSpeedPreset();
@@ -1085,7 +1072,6 @@ export default function MisionScreen() {
         if (wasActive) sendRobotDriveStop();
         wasActive = false;
       }
-      // Sólo re-render cuando el vector cambió, para no machacar el estado a 90ms.
       const sig = `${x.toFixed(2)}|${y.toFixed(2)}|${z.toFixed(2)}`;
       if (sig !== lastSig) {
         lastSig = sig;
@@ -1153,14 +1139,12 @@ export default function MisionScreen() {
     outputRange: [0, s(520)],
   });
 
-  // ── Helper para salir del split ──────────────────────────────────────────
   const exitSplit = () => {
     setIsSplit(false);
     dragX.setValue(0);
     dragY.setValue(0);
   };
 
-  // ── Gesture: PiP drag ────────────────────────────────────────────────────
   const onGestureEvent = Animated.event(
     [{ nativeEvent: { translationX: dragX, translationY: dragY } }],
     {
@@ -1202,7 +1186,6 @@ export default function MisionScreen() {
     }
   };
 
-  // ── Gesture: swipe para cerrar split ─────────────────────────────────────
   const onSplitStateChange = (event: PanGestureHandlerStateChangeEvent) => {
     if (event.nativeEvent.state === State.END) {
       if (Math.abs(event.nativeEvent.translationX) > 120) {
@@ -1211,7 +1194,6 @@ export default function MisionScreen() {
     }
   };
 
-  // ── Feed assignment ──────────────────────────────────────────────────────
   const cameraStatus = getFeedStatus(cameraFeed, 'CAM', mediaConnected, mediaError, Date.now());
   const lidarStatus = lidarData ? `LIDAR ${lidarData.count} pts` : mediaConnected ? 'LIDAR esperando' : 'LIDAR offline';
   const safetyReadout = getSafetyReadout(telemetry);
@@ -1320,7 +1302,6 @@ export default function MisionScreen() {
     }
   };
 
-  // ── Drag preview ─────────────────────────────────────────────────────────
   const renderDragPreview = () => {
     if (!dragging || !previewSide) return null;
     return (
@@ -1341,7 +1322,6 @@ export default function MisionScreen() {
         <View style={{ flex: 1 }}>
           <View style={styles.window}>
 
-            {/* ── VIDEO AREA ── */}
             {isSplit ? (
               <PanGestureHandler onHandlerStateChange={onSplitStateChange}>
                 <View style={styles.splitContainer}>
@@ -1370,7 +1350,6 @@ export default function MisionScreen() {
               </>
             )}
 
-            {/* ── HUD HEADER ── */}
             <View style={styles.hudHeader}>
               <View style={styles.leftHudGroup}>
                 <Pressable
@@ -1436,13 +1415,10 @@ export default function MisionScreen() {
               </View>
           </View>
 
-            {/* ── CONTROLS ── */}
             <View style={styles.controlsOverlay} pointerEvents="box-none">
               {joystickEnabled ? <JoystickLeft /> : <DPad />}
 
-              {/* ── Bottom tab panel ── */}
               <View style={styles.actionContainer}>
-                {/* Tab bar */}
                 <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: '#2a1f1f' }}>
                   {(['lidar', 'telemetry', 'status'] as const).map((tab) => (
                     <TouchableOpacity
@@ -1460,7 +1436,6 @@ export default function MisionScreen() {
                   ))}
                 </View>
 
-                {/* Tab content */}
                 {activeBottomTab === 'lidar' && (
                   <LidarMapView
                     points={lidarData?.points ?? null}
@@ -1507,7 +1482,6 @@ export default function MisionScreen() {
           </View>
         </View>
 
-        {/* ── SIDE MENU ── */}
         <Animated.View style={[styles.pushMenu, { width: menuWidth }]}>
           {menuVisible && (
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: s(16) }} showsVerticalScrollIndicator={false}>
@@ -1517,7 +1491,6 @@ export default function MisionScreen() {
               </TouchableOpacity>
               <View style={{ width: '100%', height: 1, backgroundColor: '#222', marginBottom: 12 }} />
 
-              {/* ── Conexión / media ── */}
               <Text style={[styles.telemetryLine, { color: '#f23b3f', marginBottom: 4 }]}>CONEXIÓN / MEDIA</Text>
               <View style={styles.operatorSection}>
                 <View style={styles.operatorRow}>
@@ -1582,7 +1555,6 @@ export default function MisionScreen() {
                 </View>
               </View>
 
-              {/* ── Velocidad ── */}
               <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>VELOCIDAD / CONTROL</Text>
               <View style={styles.speedRow}>
                 <TouchableOpacity style={styles.speedBtn} onPress={() => setRobotSpeed(Math.max(10, robotSpeed - 10))}>
@@ -1630,7 +1602,6 @@ export default function MisionScreen() {
                 <StatusBadge text={greeterStatus} mode={greeterStatus.includes('error') ? 'err' : greeterStatus.includes('listo') ? 'ok' : 'muted'} />
               </View>
 
-              {/* ── Seguridad ── */}
               <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>SEGURIDAD ANTI-CHOQUE</Text>
               <View style={styles.operatorSection}>
                 <View style={styles.operatorRow}>
@@ -1642,7 +1613,6 @@ export default function MisionScreen() {
                 <StatusBadge text={`última intervención ${safetyReadout.last}`} />
               </View>
 
-              {/* ── Color LiDAR ── */}
               <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>COLOR DE CÁMARA EN LIDAR</Text>
               <View style={styles.operatorSection}>
                 <View style={styles.operatorSwitchRow}>
@@ -1663,7 +1633,6 @@ export default function MisionScreen() {
                 <OperatorButton label="APLICAR COLOR" tone="ok" onPress={applyColor} />
               </View>
 
-              {/* ── Lidar sesión ── */}
               <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>LIDAR EN VIVO / SESIÓN</Text>
               <View style={styles.operatorSection}>
                 <View style={styles.operatorRow}>
@@ -1678,7 +1647,6 @@ export default function MisionScreen() {
                 </View>
               </View>
 
-              {/* ── Mapas / malla ── */}
               <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>BIBLIOTECA DE MAPAS / MODELO 3D</Text>
               <View style={styles.operatorSection}>
                 <View style={styles.operatorRow}>
@@ -1713,7 +1681,6 @@ export default function MisionScreen() {
                 />
               </View>
 
-              {/* ── Caras ── */}
               <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>CARAS CAPTURADAS</Text>
               <View style={styles.operatorSection}>
                 <View style={styles.operatorRow}>
@@ -1735,7 +1702,6 @@ export default function MisionScreen() {
                 </ScrollView>
               </View>
 
-              {/* ── Telemetría ── */}
               <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>TELEMETRÍA</Text>
               <View style={styles.telemetryBox}>
                 {telemetry ? (
@@ -1747,7 +1713,6 @@ export default function MisionScreen() {
                 )}
               </View>
 
-              {/* ── Eventos ── */}
               <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>EVENTOS / ACK / PREDICCIONES</Text>
               <View style={styles.telemetryBox}>
                 {operatorEvents.length ? operatorEvents.slice(0, 18).map((event) => (
@@ -1759,7 +1724,6 @@ export default function MisionScreen() {
                 )}
               </View>
 
-              {/* ── Edificios ── */}
               <Text style={[styles.telemetryLine, { color: '#f23b3f', marginTop: 14, marginBottom: 4 }]}>EDIFICIOS ANALIZADOS</Text>
               {edificios.length === 0 ? (
                 <Text style={{ color: '#433838', fontFamily: 'monospace', fontSize: 12, textAlign: 'center', marginTop: 8 }}>
@@ -1795,7 +1759,6 @@ export default function MisionScreen() {
 
       </View>
 
-      {/* ── MODAL CONFIRMAR SALIDA ── */}
       <Modal animationType="fade" transparent visible={exitConfirmVisible} onRequestClose={() => setExitConfirmVisible(false)}>
         <Pressable style={styles.aiModalOverlay} onPress={() => setExitConfirmVisible(false)}>
           <Pressable style={[styles.aiModal, { width: 340 }]}>

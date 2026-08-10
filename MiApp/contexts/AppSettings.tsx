@@ -12,7 +12,7 @@ interface AppSettings {
   setLoggedUser: (v: string | null) => void;
   misionActiva: MisionActiva | null;
   setMisionActiva: (v: MisionActiva | null) => void;
-  robotSpeed: number;          // 0–100
+  robotSpeed: number;
   setRobotSpeed: (v: number) => void;
 }
 

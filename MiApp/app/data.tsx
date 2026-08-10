@@ -19,7 +19,6 @@ function severityColor(s: number) {
   return '#f23b3f';
 }
 
-// ── Card de edificio ──────────────────────────────────────────────────────────
 function EdificioCard({ edificio }: { edificio: { nombre: string; previewUri: string; analysis: AnalysisResult } }) {
   return (
     <View style={styles.edificioCard}>
@@ -43,7 +42,6 @@ function EdificioCard({ edificio }: { edificio: { nombre: string; previewUri: st
   );
 }
 
-// ── Card de misión con rename y delete ────────────────────────────────────────
 function MisionCard({ mision, onDelete, onRename }: {
   mision: MisionResumen;
   onDelete: (id: number) => void;
@@ -71,7 +69,6 @@ function MisionCard({ mision, onDelete, onRename }: {
 
   return (
     <View style={styles.acordeon}>
-      {/* Header */}
       <View style={styles.acordeonHeader}>
         <TouchableOpacity style={{ flex: 1 }} onPress={() => setAbierto(v => !v)} activeOpacity={0.8}>
           {editando ? (
@@ -99,7 +96,6 @@ function MisionCard({ mision, onDelete, onRename }: {
         </View>
       </View>
 
-      {/* Body */}
       {abierto && (
         <View style={styles.acordeonBody}>
           {edificios.length === 0 ? (
@@ -115,7 +111,7 @@ function MisionCard({ mision, onDelete, onRename }: {
   );
 }
 
-// ── Pantalla ──────────────────────────────────────────────────────────────────
+
 export default function DataScreen() {
   const router = useRouter();
   const [misiones, setMisiones] = useState<MisionResumen[]>([]);

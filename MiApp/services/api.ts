@@ -1,12 +1,10 @@
-// IP de tu laptop (donde corre el backend Express + servidor IA).
-// Configurable desde la app → ajustes ⚙
+
 let _backendHost = '10.40.5.11';
 export function setBackendHost(ip: string) { _backendHost = ip.trim().replace(/\/$/, ''); }
 export function getBackendHost() { return _backendHost; }
 const bUrl = () => `http://${_backendHost}:3000`;
 const dUrl = () => `http://${_backendHost}:3001`;
 
-// API fija del perro (IP fija, no cambia).
 export const DOG_API_URL = 'http://10.40.5.4:8000';
 export const DOG_TOKEN = 'dev-operator-token';
 export const DOG_ROBOT_ID = 'go2_01';
@@ -106,7 +104,6 @@ export async function getRobotStatus(): Promise<RobotStatus> {
   };
 }
 
-// speedFactor: 0–1 (default 0.5 = 50% of max API speed)
 export async function moveRobot(
   direction: 'forward' | 'backward' | 'left' | 'right' | 'strafeL' | 'strafeR' | 'stop',
   speedFactor = 0.5

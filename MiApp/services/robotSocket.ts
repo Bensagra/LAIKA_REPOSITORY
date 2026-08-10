@@ -46,10 +46,6 @@ function uint8ToBase64(bytes: Uint8Array): string {
   return btoa(str);
 }
 
-// ─── Video: canvas sinks + decodificación H.264 (WebCodecs) ──────────────────
-// El edge transmite H.264 Annex-B (keyframe cada GOP + deltas). El navegador lo
-// decodifica por hardware con VideoDecoder y lo pintamos en cada <canvas>
-// registrado. webp/jpeg (fallback MJPEG) también se pinta en esos canvas.
 const videoCanvases = new Set<HTMLCanvasElement>();
 
 export function registerVideoCanvas(canvas: HTMLCanvasElement): () => void {
@@ -84,7 +80,7 @@ const videoDecoder = {
 
 function resetVideoDecoder(): void {
   if (videoDecoder.decoder) {
-    try { videoDecoder.decoder.close(); } catch { /* ignore */ }
+    try { videoDecoder.decoder.close(); } catch { }
   }
   videoDecoder.decoder = null;
   videoDecoder.configured = false;
@@ -99,7 +95,7 @@ function handleDecodedVideoFrame(frame: any): void {
     const h = frame.displayHeight || frame.codedHeight;
     drawToCanvases(frame, w, h);
     cbVideoTick?.();
-  } catch { /* ignore */ } finally {
+  } catch {} finally {
     frame.close();
   }
 }
@@ -108,7 +104,7 @@ function ensureVideoDecoder(codec: string): boolean {
   const vd = videoDecoder;
   if (vd.decoder && vd.configured && vd.codec === codec) return true;
   if (vd.decoder) {
-    try { vd.decoder.close(); } catch { /* ignore */ }
+    try { vd.decoder.close(); } catch {}
   }
   const VideoDecoderCtor = (globalThis as any).VideoDecoder;
   vd.decoder = new VideoDecoderCtor({
@@ -142,7 +138,7 @@ function decodeH264(header: Record<string, unknown>, bytes: Uint8Array): void {
   const vd = videoDecoder;
   const isKey = !!header.key;
   if (vd.needKeyframe) {
-    // No se puede arrancar (ni resincronizar) en un delta: esperá un keyframe.
+   
     if (!isKey) return;
     vd.needKeyframe = false;
   }
@@ -162,7 +158,6 @@ function decodeH264(header: Record<string, unknown>, bytes: Uint8Array): void {
   }
 }
 
-// webp/jpeg/png entregado como bytes crudos → pintar en los canvas (web).
 function drawImageBytesToCanvases(bytes: Uint8Array, mime: string): void {
   if (videoCanvases.size === 0 || typeof createImageBitmap !== 'function') return;
   const copy = bytes.slice(0);
@@ -172,7 +167,7 @@ function drawImageBytesToCanvases(bytes: Uint8Array, mime: string): void {
       cbVideoTick?.();
       if (typeof bmp.close === 'function') bmp.close();
     })
-    .catch(() => { /* ignore bad frame */ });
+    .catch(() => {});
 }
 
 function i16ToPoints(raw: Uint8Array, count: number, scale: number, offset: number[]): Float32Array {
@@ -221,7 +216,7 @@ function parseLidar(header: Record<string, unknown>, payload: Uint8Array, frameB
       const points = i16ToPoints(raw, count, scale, offset);
       emit(points, colors);
     }
-  } catch { /* ignore bad frames */ }
+  } catch {}
 }
 
 function parseFrame(buffer: ArrayBuffer): void {
@@ -248,7 +243,7 @@ function parseFrame(buffer: ArrayBuffer): void {
       return;
     }
     const mime = fmt === 'png' ? 'image/png' : fmt === 'webp' ? 'image/webp' : 'image/jpeg';
-    // En web pintamos en el canvas; el data URI sólo lo necesita el <Image> de nativo.
+   
     drawImageBytesToCanvases(payload, mime);
     cbVideo?.(`data:${mime};base64,${uint8ToBase64(payload)}`);
     return;
@@ -259,26 +254,24 @@ function parseFrame(buffer: ArrayBuffer): void {
   }
 }
 
-// React Native may deliver binary as base64 string instead of ArrayBuffer
 function handleMessage(data: unknown): void {
   if (data instanceof ArrayBuffer) {
     parseFrame(data);
     return;
   }
   if (typeof data === 'string') {
-    // Try JSON telemetry first
+ 
     if (data.startsWith('{') || data.startsWith('[')) {
       try {
         const msg = JSON.parse(data);
         handleJsonMessage(msg);
-      } catch { /* ignore */ }
+      } catch {}
       return;
     }
-    // Try base64-encoded binary frame (React Native fallback)
     try {
       const bin = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
       parseFrame(bin.buffer);
-    } catch { /* ignore */ }
+    } catch { }
   }
 }
 
@@ -346,7 +339,7 @@ function doConnect(gen: number): void {
 
     socket.onmessage = (event) => {
       if (gen !== currentGen) return;
-      try { handleMessage(event.data); } catch { /* ignore */ }
+      try { handleMessage(event.data); } catch { }
     };
 
     socket.onclose = () => {

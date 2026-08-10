@@ -117,7 +117,6 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Settings modal */}
       <Modal animationType="fade" transparent visible={settingsVisible} onRequestClose={() => setSettingsVisible(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setSettingsVisible(false)}>
           <Pressable style={styles.authModal}>
@@ -160,7 +159,6 @@ export default function HomeScreen() {
         </Pressable>
       </Modal>
 
-      {/* Auth modal */}
       <Modal animationType="fade" transparent visible={authVisible} onRequestClose={() => setAuthVisible(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setAuthVisible(false)}>
           <Pressable style={styles.authModal}>
