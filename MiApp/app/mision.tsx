@@ -39,11 +39,13 @@ import {
   AnalysisResult,
   DañoDetectado,
   finalizarMision,
+  MisionGaleriaItem,
   emergencyStop,
   autonomousStart,
   autonomousStop,
   sendDogCommand,
 } from '../services/api';
+import { saveMissionVideo } from '../services/misionMedia';
 import {
   connectRobotWS,
   registerVideoCanvas,
@@ -452,6 +454,7 @@ const CameraFeed = ({
     <View style={styles.videoStreamContainer}>
       {React.createElement('canvas', {
         ref: canvasRef,
+        id: 'laika-camera-canvas',
         style: {
           width: '100%',
           height: '100%',
@@ -489,7 +492,7 @@ function getFeedStatus(
 
 export default function MisionScreen() {
   const router = useRouter();
-  const { joystickEnabled, misionActiva, setMisionActiva, robotSpeed, setRobotSpeed } = useAppSettings();
+  const { joystickEnabled, misionActiva, setMisionActiva, robotSpeed, setRobotSpeed, videoResolution, lidarMaxPoints } = useAppSettings();
   const [isExtraFeature, setIsExtraFeature] = useState(false);
   const [robotStatus, setRobotStatus] = useState<RobotStatus | null>(null);
 
@@ -508,6 +511,8 @@ export default function MisionScreen() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [edificios, setEdificios] = useState<Edificio[]>([]);
+  const [galeria, setGaleria] = useState<MisionGaleriaItem[]>([]);
+  const [grabandoPantalla, setGrabandoPantalla] = useState(false);
   const [cameraFeed, setCameraFeed] = useState<VisualFeedState>({ uri: null, lastFrameAt: 0 });
   const [mediaConnected, setMediaConnected] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
@@ -522,8 +527,9 @@ export default function MisionScreen() {
     audio: false,
     cameraFps: NETWORK_PROFILES.weak.cameraFps,
     cameraQuality: NETWORK_PROFILES.weak.cameraQuality,
-    cameraWidth: NETWORK_PROFILES.weak.cameraWidth,
+    cameraWidth: videoResolution,
     cameraBitrateKbps: NETWORK_PROFILES.weak.cameraBitrateKbps,
+    lidarMaxPoints,
     audioEmitEvery: 2,
     audioMaxBytes: 24576,
   }));
@@ -563,6 +569,7 @@ export default function MisionScreen() {
   const [recordingLidar, setRecordingLidar] = useState(false);
   const [recordedFrames, setRecordedFrames] = useState(0);
   const lastVideoRef = useRef(0);
+  const lastVideoUiRef = useRef(0);
   const lastTelemetryRef = useRef(0);
   const lastLidarRef = useRef(0);
   const netBytesRef = useRef({ video: 0, lidar: 0, audio: 0 });
@@ -574,6 +581,8 @@ export default function MisionScreen() {
     startedAt: 0,
     frames: [],
   });
+  const screenRecorderRef = useRef<any>(null);
+  const screenStreamRef = useRef<any>(null);
   const [autoMode, setAutoMode] = useState(false);
 
   const menuAnim = useRef(new Animated.Value(0)).current;
@@ -679,6 +688,7 @@ export default function MisionScreen() {
       cameraQuality: preset.cameraQuality,
       cameraWidth: preset.cameraWidth,
       cameraBitrateKbps: preset.cameraBitrateKbps,
+      lidarMaxPoints: preset.lidarMaxPoints,
     };
     setNetworkProfile(profile);
     setMediaSettings(next);
@@ -924,6 +934,10 @@ export default function MisionScreen() {
   }, [mediaSettings, networkProfile]);
 
   useEffect(() => {
+    setMediaSettings((prev) => ({ ...prev, cameraWidth: videoResolution, lidarMaxPoints }));
+  }, [lidarMaxPoints, videoResolution]);
+
+  useEffect(() => {
     getRobotStatus().then(setRobotStatus).catch(() => {});
     const interval = setInterval(() => {
       getRobotStatus().then(setRobotStatus).catch(() => {});
@@ -949,15 +963,20 @@ export default function MisionScreen() {
       },
       onVideoFrame: (uri) => {
         const now = Date.now();
-        if (now - lastVideoRef.current < 66) return;
+        if (Platform.OS === 'web') {
+          if (now - lastVideoUiRef.current < 1000) return;
+          lastVideoUiRef.current = now;
+          setCameraFeed((prev) => ({ uri: prev.uri, lastFrameAt: now }));
+          return;
+        }
+        if (now - lastVideoRef.current < 100) return;
         lastVideoRef.current = now;
         setCameraFeed({ uri, lastFrameAt: now });
       },
       onVideoTick: () => {
-
         const now = Date.now();
-        if (now - lastVideoRef.current < 200) return;
-        lastVideoRef.current = now;
+        if (now - lastVideoUiRef.current < 1000) return;
+        lastVideoUiRef.current = now;
         setCameraFeed((prev) => ({ uri: prev.uri, lastFrameAt: now }));
       },
       onTelemetry: (data) => {
@@ -975,7 +994,7 @@ export default function MisionScreen() {
       },
       onLidar: (points, count) => {
         const now = Date.now();
-        if (now - lastLidarRef.current < 200) return;
+        if (now - lastLidarRef.current < 400) return;
         lastLidarRef.current = now;
         setLidarData({ points, count });
         const rec = lidarRecordRef.current;
@@ -1302,6 +1321,82 @@ export default function MisionScreen() {
     }
   };
 
+  const tomarCaptura = useCallback(() => {
+    if (Platform.OS !== 'web') {
+      Alert.alert('Captura', 'Esta versión todavía permite capturar desde la consola web.');
+      return;
+    }
+    const canvas = document.getElementById('laika-camera-canvas') as HTMLCanvasElement | null;
+    const uri = canvas && canvas.width > 0 && canvas.height > 0
+      ? canvas.toDataURL('image/jpeg', 0.9)
+      : cameraFeed.uri;
+    if (!uri) {
+      Alert.alert('Captura', 'Esperá a que llegue señal de la cámara para sacar una captura.');
+      return;
+    }
+    const item: MisionGaleriaItem = {
+      id: `captura-${Date.now()}`,
+      tipo: 'captura',
+      creado_at: new Date().toISOString(),
+      uri,
+    };
+    setGaleria((prev) => [...prev, item]);
+    addOperatorEvent('mission_screenshot', item.id);
+  }, [addOperatorEvent, cameraFeed.uri]);
+
+  const detenerGrabacionPantalla = useCallback(() => {
+    screenRecorderRef.current?.stop();
+  }, []);
+
+  const alternarGrabacionPantalla = useCallback(async () => {
+    if (grabandoPantalla) {
+      detenerGrabacionPantalla();
+      return;
+    }
+    if (Platform.OS !== 'web' || !navigator.mediaDevices?.getDisplayMedia || typeof MediaRecorder === 'undefined') {
+      Alert.alert('Grabación', 'La grabación de pantalla está disponible en navegadores web compatibles.');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const chunks: BlobPart[] = [];
+      const startedAt = Date.now();
+      const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm' });
+      screenStreamRef.current = stream;
+      screenRecorderRef.current = recorder;
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onstop = async () => {
+        const durationMs = Date.now() - startedAt;
+        setGrabandoPantalla(false);
+        screenRecorderRef.current = null;
+        stream.getTracks().forEach((track) => track.stop());
+        screenStreamRef.current = null;
+        if (!chunks.length) return;
+        try {
+          const id = `video-${Date.now()}`;
+          const video = new Blob(chunks, { type: recorder.mimeType || 'video/webm' });
+          await saveMissionVideo(id, video);
+          setGaleria((prev) => [...prev, { id, tipo: 'video', creado_at: new Date().toISOString(), videoId: id, duracionMs: durationMs }]);
+          addOperatorEvent('mission_screen_recording', `${Math.round(durationMs / 1000)}s`);
+        } catch (error) {
+          Alert.alert('Grabación', 'No se pudo guardar el video en este navegador.');
+          addOperatorEvent('mission_screen_recording_error', error instanceof Error ? error.message : String(error));
+        }
+      };
+      stream.getVideoTracks()[0].onended = () => { if (recorder.state !== 'inactive') recorder.stop(); };
+      recorder.start(1000);
+      setGrabandoPantalla(true);
+      addOperatorEvent('mission_screen_recording_started', 'grabando pantalla');
+    } catch (error) {
+      if ((error as Error)?.name !== 'NotAllowedError') Alert.alert('Grabación', 'No se pudo iniciar la grabación de pantalla.');
+    }
+  }, [addOperatorEvent, detenerGrabacionPantalla, grabandoPantalla]);
+
+  useEffect(() => () => {
+    if (screenRecorderRef.current?.state === 'recording') screenRecorderRef.current.stop();
+    screenStreamRef.current?.getTracks().forEach((track: MediaStreamTrack) => track.stop());
+  }, []);
+
   const renderDragPreview = () => {
     if (!dragging || !previewSide) return null;
     return (
@@ -1400,11 +1495,22 @@ export default function MisionScreen() {
               </View>
 
               <View style={styles.rightHudGroup}>
+                <TouchableOpacity style={styles.captureHudButton} onPress={tomarCaptura}>
+                  <MaterialIcons name="photo-camera" size={s(17)} color="#f23b3f" />
+                  <Text style={styles.captureHudText}>CAPTURA</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.captureHudButton, grabandoPantalla && styles.recordingHudButton]}
+                  onPress={alternarGrabacionPantalla}
+                >
+                  <MaterialIcons name={grabandoPantalla ? 'stop' : 'fiber-manual-record'} size={s(17)} color={grabandoPantalla ? '#fff' : '#f23b3f'} />
+                  <Text style={[styles.captureHudText, grabandoPantalla && { color: '#fff' }]}>{grabandoPantalla ? 'DETENER' : 'GRABAR'}</Text>
+                </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.stopHudBtn}
                   onPress={() => emergencyStop().catch(() => {})}
                 >
-                  <Text style={styles.stopHudText}>⛔ STOP</Text>
+                  <Text style={styles.stopHudText}> STOP</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.aiHudButton} onPress={() => setAiVisible(true)}>
                   <MaterialIcons name="auto-awesome" size={s(18)} color="#f23b3f" />
@@ -1764,7 +1870,7 @@ export default function MisionScreen() {
           <Pressable style={[styles.aiModal, { width: 340 }]}>
             <Text style={[styles.aiModalTitle, { marginBottom: 10 }]}>¿Salir de la misión?</Text>
             <Text style={{ color: '#8b7474', fontFamily: 'monospace', fontSize: 13, marginBottom: 20 }}>
-              Se guardará con todos los edificios analizados.
+              Se guardarán los edificios y {galeria.length} archivo(s) de la galería.
             </Text>
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <TouchableOpacity
@@ -1776,6 +1882,10 @@ export default function MisionScreen() {
               <TouchableOpacity
                 style={[styles.analyzeButton, { flex: 1 }]}
                 onPress={async () => {
+                  if (grabandoPantalla) {
+                    Alert.alert('Grabación en curso', 'Detené la grabación y esperá a que se guarde antes de salir de la misión.');
+                    return;
+                  }
                   setExitConfirmVisible(false);
                   if (misionActiva && misionActiva.id > 0) {
                     try {
@@ -1785,7 +1895,7 @@ export default function MisionScreen() {
                           previewUri: await imageToBase64(e.previewUri),
                         }))
                       );
-                      await finalizarMision(misionActiva.id, edificiosConFoto);
+                      await finalizarMision(misionActiva.id, edificiosConFoto, galeria);
                     } catch {}
                   }
                   setMisionActiva(null);

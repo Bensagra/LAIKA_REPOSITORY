@@ -1,5 +1,5 @@
 
-let _backendHost = '10.40.5.11';
+let _backendHost = '10.4.13.35';
 export function setBackendHost(ip: string) { _backendHost = ip.trim().replace(/\/$/, ''); }
 export function getBackendHost() { return _backendHost; }
 const bUrl = () => `http://${_backendHost}:3000`;
@@ -218,6 +218,20 @@ export interface MisionResumen {
   created_at: string;
 }
 
+export interface MisionGaleriaItem {
+  id: string;
+  tipo: 'captura' | 'video';
+  creado_at: string;
+  uri?: string;
+  videoId?: string;
+  duracionMs?: number;
+}
+
+export interface MisionContenido {
+  edificios: any[];
+  galeria: MisionGaleriaItem[];
+}
+
 const MISIONES_STORAGE_KEY = 'laika.misiones';
 
 function canUseLocalStorage() {
@@ -282,7 +296,8 @@ export async function getMisiones(): Promise<MisionResumen[]> {
   if (!res.ok) throw new Error('No se pudieron obtener las misiones');
   const remotas: MisionResumen[] = await res.json();
   const porId = new Map<number, MisionResumen>();
-  [...locales, ...remotas].forEach((mision) => porId.set(mision.id_mision, mision));
+  // La copia local puede incluir galería multimedia que un backend anterior aún no conoce.
+  [...remotas, ...locales].forEach((mision) => porId.set(mision.id_mision, mision));
   const combinadas = Array.from(porId.values()).sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
@@ -293,14 +308,15 @@ export async function getMisiones(): Promise<MisionResumen[]> {
   }
 }
 
-export async function finalizarMision(id: number, edificios: any[]): Promise<void> {
+export async function finalizarMision(id: number, edificios: any[], galeria: MisionGaleriaItem[] = []): Promise<void> {
+  const contenido: MisionContenido = { edificios, galeria };
   const misiones = getMisionesLocales();
   const index = misiones.findIndex((m) => m.id_mision === id);
   if (index >= 0) {
     misiones[index] = {
       ...misiones[index],
       estado_mision: 'finalizada',
-      descripcion: JSON.stringify(edificios),
+      descripcion: JSON.stringify(contenido),
     };
     setMisionesLocales(misiones);
   }
@@ -309,7 +325,7 @@ export async function finalizarMision(id: number, edificios: any[]): Promise<voi
   await fetch(`${bUrl()}/misiones/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ edificios }),
+    body: JSON.stringify({ edificios, galeria }),
   });
   } catch {}
 }

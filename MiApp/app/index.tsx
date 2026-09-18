@@ -25,7 +25,10 @@ const BACKEND_IP_KEY = 'laika.backendIp';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { joystickEnabled, setJoystickEnabled, loggedUser, setLoggedUser, setMisionActiva } = useAppSettings();
+  const {
+    joystickEnabled, setJoystickEnabled, loggedUser, setLoggedUser, setMisionActiva,
+    videoResolution, setVideoResolution, lidarMaxPoints, setLidarMaxPoints,
+  } = useAppSettings();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -134,6 +137,40 @@ export default function HomeScreen() {
                 trackColor={{ false: '#333', true: 'rgba(242, 59, 63, 0.35)' }}
                 thumbColor={joystickEnabled ? '#f23b3f' : '#666'}
               />
+            </View>
+            <View style={styles.mediaSetting}>
+              <Text style={styles.settingLabel}>RESOLUCIÓN DE VIDEO</Text>
+              <View style={styles.settingOptions}>
+                {[640, 960, 1280].map((value) => (
+                  <TouchableOpacity
+                    key={value}
+                    onPress={() => setVideoResolution(value)}
+                    style={[styles.settingOption, videoResolution === value && styles.settingOptionActive]}
+                  >
+                    <Text style={[styles.settingOptionText, videoResolution === value && styles.settingOptionTextActive]}>{value}p</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.settingHint}>Menor resolución = video más fluido.</Text>
+            </View>
+            <View style={styles.mediaSetting}>
+              <Text style={styles.settingLabel}>RESOLUCIÓN LIDAR</Text>
+              <View style={styles.settingOptions}>
+                {[
+                  { value: 2500, label: 'BAJA' },
+                  { value: 8000, label: 'MEDIA' },
+                  { value: 30000, label: 'ALTA' },
+                ].map(({ value, label }) => (
+                  <TouchableOpacity
+                    key={value}
+                    onPress={() => setLidarMaxPoints(value)}
+                    style={[styles.settingOption, lidarMaxPoints === value && styles.settingOptionActive]}
+                  >
+                    <Text style={[styles.settingOptionText, lidarMaxPoints === value && styles.settingOptionTextActive]}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.settingHint}>{lidarMaxPoints.toLocaleString()} puntos por cuadro · baja es la más fluida.</Text>
             </View>
             <View style={[styles.settingRow, { flexDirection: 'column', alignItems: 'flex-start', gap: 6 }]}>
               <Text style={styles.settingLabel}>IP LAPTOP (backend)</Text>

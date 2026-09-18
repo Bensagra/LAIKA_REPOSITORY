@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AppRegistry } from 'react-native';
-import HomeScreen from '../app';
+// Explicitly select the screen file: `../app` resolves to app.json in Vite.
+import HomeScreen from '../app/index';
 import MisionScreen from '../app/mision';
 import { AppSettingsProvider } from '../contexts/AppSettings';
 

@@ -76,6 +76,7 @@ export interface DogMediaSettings {
   cameraQuality: number;
   cameraWidth: number;
   cameraBitrateKbps: number;
+  lidarMaxPoints: number;
   audioEmitEvery: number;
   audioMaxBytes: number;
 }
@@ -179,6 +180,7 @@ export async function configureDogMedia(settings: DogMediaSettings): Promise<voi
   const cameraQuality = clamp(Math.round(settings.cameraQuality), 25, 90);
   const cameraWidth = clamp(Math.round(settings.cameraWidth), 320, 1920);
   const bitrate = clamp(Math.round(settings.cameraBitrateKbps), 100, 12000);
+  const lidarMaxPoints = clamp(Math.round(settings.lidarMaxPoints), 1000, 30000);
   const audioEmitEvery = clamp(Math.round(settings.audioEmitEvery), 1, 10);
   const audioMaxBytes = clamp(Math.round(settings.audioMaxBytes), 0, 262144);
 
@@ -203,7 +205,7 @@ export async function configureDogMedia(settings: DogMediaSettings): Promise<voi
     enabled: settings.lidar,
     subscribe: true,
     media_hz: profile.lidarHz,
-    max_points: profile.lidarMaxPoints,
+    max_points: lidarMaxPoints,
     compression_level: profile.lidarCompression,
     quantization_cm: profile.lidarQuantizationCm,
   }, 2000);

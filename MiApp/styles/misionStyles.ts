@@ -726,6 +726,26 @@ export const styles = StyleSheet.create({
     fontSize: f(10),
     fontWeight: '700' as const,
   },
+  captureHudButton: {
+    minHeight: s(30),
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: s(4),
+    borderWidth: 1,
+    borderColor: RED,
+    borderRadius: 4,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: s(8),
+  },
+  recordingHudButton: {
+    backgroundColor: RED,
+  },
+  captureHudText: {
+    color: RED,
+    fontFamily: 'monospace',
+    fontSize: f(10),
+    fontWeight: '700' as const,
+  },
   profileRow: {
     flexDirection: 'row',
     gap: s(6),

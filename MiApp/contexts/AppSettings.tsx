@@ -14,6 +14,10 @@ interface AppSettings {
   setMisionActiva: (v: MisionActiva | null) => void;
   robotSpeed: number;
   setRobotSpeed: (v: number) => void;
+  videoResolution: number;
+  setVideoResolution: (v: number) => void;
+  lidarMaxPoints: number;
+  setLidarMaxPoints: (v: number) => void;
 }
 
 const AppSettingsContext = createContext<AppSettings>({
@@ -25,6 +29,10 @@ const AppSettingsContext = createContext<AppSettings>({
   setMisionActiva: () => {},
   robotSpeed: 50,
   setRobotSpeed: () => {},
+  videoResolution: 640,
+  setVideoResolution: () => {},
+  lidarMaxPoints: 2500,
+  setLidarMaxPoints: () => {},
 });
 
 export function AppSettingsProvider({ children }: { children: React.ReactNode }) {
@@ -32,12 +40,16 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
   const [loggedUser, setLoggedUser] = useState<string | null>(null);
   const [misionActiva, setMisionActiva] = useState<MisionActiva | null>(null);
   const [robotSpeed, setRobotSpeed] = useState(50);
+  const [videoResolution, setVideoResolution] = useState(640);
+  const [lidarMaxPoints, setLidarMaxPoints] = useState(2500);
   return (
     <AppSettingsContext.Provider value={{
       joystickEnabled, setJoystickEnabled,
       loggedUser, setLoggedUser,
       misionActiva, setMisionActiva,
       robotSpeed, setRobotSpeed,
+      videoResolution, setVideoResolution,
+      lidarMaxPoints, setLidarMaxPoints,
     }}>
       {children}
     </AppSettingsContext.Provider>

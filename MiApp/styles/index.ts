@@ -186,6 +186,45 @@ export const styles = StyleSheet.create({
     fontSize: f(14),
     fontFamily: 'monospace',
   },
+  mediaSetting: {
+    paddingTop: s(10),
+    paddingBottom: s(6),
+    gap: s(7),
+    borderTopWidth: 1,
+    borderTopColor: '#3a2a2a',
+  },
+  settingOptions: {
+    flexDirection: 'row',
+    gap: s(7),
+  },
+  settingOption: {
+    flex: 1,
+    minHeight: s(32),
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#6a4a4b',
+    borderRadius: 4,
+    backgroundColor: 'rgba(75, 63, 63, 0.25)',
+  },
+  settingOptionActive: {
+    borderColor: RED,
+    backgroundColor: 'rgba(242, 59, 63, 0.14)',
+  },
+  settingOptionText: {
+    color: '#8b7474',
+    fontFamily: 'monospace',
+    fontSize: f(11),
+  },
+  settingOptionTextActive: {
+    color: RED,
+    fontWeight: '700',
+  },
+  settingHint: {
+    color: '#6b5555',
+    fontFamily: 'monospace',
+    fontSize: f(10),
+  },
 
   dogButton: {
     height: s(36),
