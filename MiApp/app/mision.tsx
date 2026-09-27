@@ -4,7 +4,6 @@ import {
   TouchableOpacity,
   Pressable,
   Text,
-  Dimensions,
   Animated,
   ScrollView,
   Modal,
@@ -18,12 +17,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import {
-  PanGestureHandler,
-  GestureHandlerRootView,
-  State,
-  PanGestureHandlerStateChangeEvent,
-} from 'react-native-gesture-handler';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import * as ScreenOrientation from 'expo-screen-orientation';
 
@@ -83,7 +77,6 @@ import {
   testDogGreeting,
   updateDogFace,
 } from '../services/operator';
-const { width } = Dimensions.get('window');
 
 interface Edificio {
   nombre: string;
@@ -466,7 +459,7 @@ const CameraFeed = ({
   }, []);
 
   return (
-    <View style={styles.videoStreamContainer}>
+    <View style={[styles.videoStreamContainer, styles.noSignalFeed]}>
       {Platform.OS === 'web'
         ? React.createElement('canvas', {
           ref: canvasRef,
@@ -485,6 +478,23 @@ const CameraFeed = ({
     </View>
   );
 };
+
+type FeedTileKey = 'cam' | 'lidar' | 'thermal' | 'ir';
+
+// Label corner per grid tile (TL, TR, BL, BR): the corner nearest the center.
+const FEED_LABEL_CORNERS = [
+  { right: 8, bottom: 8, alignItems: 'flex-end' as const },
+  { left: 8, bottom: 8 },
+  { right: 8, top: 8, alignItems: 'flex-end' as const },
+  { left: 8, top: 8 },
+];
+
+// Thermal/IR cameras have no stream from the robot yet.
+const NoSignalFeed = () => (
+  <View style={[styles.videoStreamContainer, styles.noSignalFeed]}>
+    <Text style={styles.noSignalText}>SIN SEÑAL</Text>
+  </View>
+);
 
 const PadlockIcon = ({ open }: { open: boolean }) => (
   <View style={{ alignItems: 'center' }}>
@@ -514,14 +524,10 @@ export default function MisionScreen() {
   const [isExtraFeature, setIsExtraFeature] = useState(false);
   const [robotStatus, setRobotStatus] = useState<RobotStatus | null>(null);
 
-  const [isCameraMain, setIsCameraMain] = useState(true);
-  const [isSplit, setIsSplit] = useState(false);
-  const [splitSide, setSplitSide] = useState<'left' | 'right'>('right');
-  const [dragging, setDragging] = useState(false);
-  const [previewSide, setPreviewSide] = useState<'left' | 'right' | null>(null);
+  const [expandedTile, setExpandedTile] = useState<FeedTileKey | null>(null);
+  const lastTapRef = useRef<{ key: FeedTileKey | null; at: number }>({ key: null, at: 0 });
   const [menuVisible, setMenuVisible] = useState(false);
   const [homeHovered, setHomeHovered] = useState(false);
-  const [fullHovered, setFullHovered] = useState(false);
   const [exitConfirmVisible, setExitConfirmVisible] = useState(false);
   const [aiVisible, setAiVisible] = useState(false);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
@@ -603,8 +609,6 @@ export default function MisionScreen() {
   const [autoMode, setAutoMode] = useState(false);
 
   const menuAnim = useRef(new Animated.Value(0)).current;
-  const dragX = useRef(new Animated.Value(0)).current;
-  const dragY = useRef(new Animated.Value(0)).current;
 
   // Events can arrive many times per second over the WS; buffer them and
   // flush in one state update so the whole screen doesn't re-render per event.
@@ -1195,58 +1199,15 @@ export default function MisionScreen() {
     outputRange: [0, s(520)],
   });
 
-  const exitSplit = () => {
-    setIsSplit(false);
-    dragX.setValue(0);
-    dragY.setValue(0);
-  };
-
-  const onGestureEvent = Animated.event(
-    [{ nativeEvent: { translationX: dragX, translationY: dragY } }],
-    {
-      useNativeDriver: false,
-      listener: (event: any) => {
-        const absX = event.nativeEvent.absoluteX;
-        const screenW = menuVisible ? width - s(520) : width;
-        if (absX < screenW * 0.4) {
-          setPreviewSide('left');
-        } else if (absX > screenW * 0.6) {
-          setPreviewSide('right');
-        } else {
-          setPreviewSide(null);
-        }
-      },
-    }
-  );
-
-  const onPipStateChange = (event: PanGestureHandlerStateChangeEvent) => {
-    if (event.nativeEvent.state === State.BEGAN) {
-      setDragging(true);
-    }
-    if (event.nativeEvent.state === State.END || event.nativeEvent.state === State.CANCELLED) {
-      const absX = event.nativeEvent.absoluteX;
-      const screenW = menuVisible ? width - s(520) : width;
-
-      if (absX < screenW * 0.4) {
-        setSplitSide('left');
-        setIsSplit(true);
-      } else if (absX > screenW * 0.6) {
-        setSplitSide('right');
-        setIsSplit(true);
-      }
-
-      Animated.spring(dragX, { toValue: 0, useNativeDriver: false }).start();
-      Animated.spring(dragY, { toValue: 0, useNativeDriver: false }).start();
-      setDragging(false);
-      setPreviewSide(null);
-    }
-  };
-
-  const onSplitStateChange = (event: PanGestureHandlerStateChangeEvent) => {
-    if (event.nativeEvent.state === State.END) {
-      if (Math.abs(event.nativeEvent.translationX) > 120) {
-        exitSplit();
-      }
+  // Double tap/click on a tile toggles it between the 2x2 grid and full screen.
+  const handleTileTap = (key: FeedTileKey) => {
+    const now = Date.now();
+    const last = lastTapRef.current;
+    if (last.key === key && now - last.at < 350) {
+      setExpandedTile((current) => (current === key ? null : key));
+      lastTapRef.current = { key: null, at: 0 };
+    } else {
+      lastTapRef.current = { key, at: now };
     }
   };
 
@@ -1256,18 +1217,22 @@ export default function MisionScreen() {
 
   // Elements, not components: a new component identity per render would
   // remount the feed (and wipe the video canvas) on every state update.
-  // Status badge only on the big view; the PiP stays a clean panel.
-  const camView = (showBadge: boolean) => (
-    <CameraFeed feed={cameraFeed} status={cameraStatus} showBadge={showBadge} />
-  );
-  const lidarView = (showBadge: boolean) => (
-    <LidarFeed lidarData={lidarData} status={lidarStatus} showBadge={showBadge} />
-  );
-
-  const mainFeed = isCameraMain ? camView(true) : lidarView(true);
-  const pipFeed  = isCameraMain ? lidarView(false) : camView(false);
-  const leftFeed  = splitSide === 'left'  ? pipFeed : mainFeed;
-  const rightFeed = splitSide === 'right' ? pipFeed : mainFeed;
+  const feedTiles: { key: FeedTileKey; label: string; status: string; content: React.ReactNode }[] = [
+    {
+      key: 'cam',
+      label: 'CÁMARA',
+      status: cameraStatus,
+      content: <CameraFeed feed={cameraFeed} status={cameraStatus} showBadge={false} />,
+    },
+    {
+      key: 'lidar',
+      label: 'LIDAR',
+      status: lidarStatus,
+      content: <LidarFeed lidarData={lidarData} status={lidarStatus} showBadge={false} />,
+    },
+    { key: 'thermal', label: 'TÉRMICA', status: 'sin señal', content: <NoSignalFeed /> },
+    { key: 'ir', label: 'INFRARROJA', status: 'sin señal', content: <NoSignalFeed /> },
+  ];
   const severityColor = (s: number) => {
     if (s <= 3) return '#22c55e';
     if (s <= 6) return '#f59e0b';
@@ -1421,19 +1386,6 @@ export default function MisionScreen() {
     screenStreamRef.current?.getTracks().forEach((track: MediaStreamTrack) => track.stop());
   }, []);
 
-  const renderDragPreview = () => {
-    if (!dragging || !previewSide) return null;
-    return (
-      <View style={styles.dragPreviewOverlay} pointerEvents="none">
-        <View style={[styles.dragPreviewHalf, previewSide === 'left' ? styles.dragPreviewActive : styles.dragPreviewDim]}>
-          {pipFeed}
-        </View>
-        <View style={[styles.dragPreviewHalf, previewSide === 'right' ? styles.dragPreviewActive : styles.dragPreviewDim]}>
-          {mainFeed}
-        </View>
-      </View>
-    );
-  };
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View style={{ flex: 1, flexDirection: 'row', backgroundColor: '#000' }}>
@@ -1441,33 +1393,43 @@ export default function MisionScreen() {
         <View style={{ flex: 1 }}>
           <View style={styles.window}>
 
-            {isSplit ? (
-              <PanGestureHandler onHandlerStateChange={onSplitStateChange}>
-                <View style={styles.splitContainer}>
-                  <View style={styles.splitHalf}>{leftFeed}</View>
-                  <View style={[styles.splitHalf, styles.splitHalfRight]}>{rightFeed}</View>
-                </View>
-              </PanGestureHandler>
-            ) : (
-              <>
-                <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
-                  {mainFeed}
-                </View>
-
-                <PanGestureHandler onGestureEvent={onGestureEvent} onHandlerStateChange={onPipStateChange}>
-                  <Animated.View style={[styles.pipWindow, { transform: [{ translateX: dragX }, { translateY: dragY }] }]}>
-                    <TouchableOpacity style={styles.pipTouchable} onPress={() => setIsCameraMain(!isCameraMain)} activeOpacity={0.85}>
-                      {pipFeed}
-                      <View style={styles.pipSwapHint}>
-                        <Text style={styles.pipSwapText}>TAP TO SWAP</Text>
-                      </View>
-                    </TouchableOpacity>
-                  </Animated.View>
-                </PanGestureHandler>
-
-                {renderDragPreview()}
-              </>
-            )}
+            {/* All four tiles stay mounted; expanding just restyles them, so
+                the camera canvas never remounts (no black flash). */}
+            <View style={styles.feedGrid}>
+              {feedTiles.map((tile, index) => {
+                const expanded = expandedTile === tile.key;
+                const hidden = expandedTile !== null && !expanded;
+                return (
+                  <Pressable
+                    key={tile.key}
+                    onPress={() => handleTileTap(tile.key)}
+                    style={[
+                      styles.feedTile,
+                      index % 2 === 0 && styles.feedTileLeftCol,
+                      index < 2 && styles.feedTileTopRow,
+                      expanded && styles.feedTileExpanded,
+                      hidden && styles.feedTileHidden,
+                    ]}
+                  >
+                    {tile.content}
+                    <View
+                      pointerEvents="none"
+                      style={[
+                        styles.feedLabel,
+                        // Labels sit at the corner nearest the screen center,
+                        // away from the header and the joysticks.
+                        expanded ? styles.feedLabelExpanded : FEED_LABEL_CORNERS[index],
+                      ]}
+                    >
+                      <Text style={styles.feedLabelText}>{tile.label}</Text>
+                      <Text style={styles.feedLabelStatus}>
+                        {tile.status}{expanded ? ' · doble toque para volver' : ''}
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
 
             <View style={styles.hudHeader}>
               <View style={styles.leftHudGroup}>
@@ -1484,20 +1446,10 @@ export default function MisionScreen() {
                     <Text style={[styles.btnText, (pressed || homeHovered) && styles.btnTextActive]}>HOME</Text>
                   )}
                 </Pressable>
-                {isSplit && (
-                  <Pressable
-                    onPress={exitSplit}
-                    onHoverIn={() => setFullHovered(true)}
-                    onHoverOut={() => setFullHovered(false)}
-                    style={({ pressed }) => [
-                      styles.btnFullScreen,
-                      (pressed || fullHovered) && styles.btnFullActive,
-                    ]}
-                  >
-                    {({ pressed }) => (
-                      <Text style={[styles.btnText, (pressed || fullHovered) && styles.btnTextActive]}>FULL</Text>
-                    )}
-                  </Pressable>
+                {expandedTile && (
+                  <TouchableOpacity activeOpacity={0.8} onPress={() => setExpandedTile(null)} style={styles.btnFullScreen}>
+                    <Text style={styles.btnText}>4 VISTAS</Text>
+                  </TouchableOpacity>
                 )}
 
               <View style={styles.telemetryContainer}>
@@ -1521,15 +1473,13 @@ export default function MisionScreen() {
               </View>
           </View>
 
-            {!isSplit && (
-              <TouchableOpacity
-                activeOpacity={0.8}
-                style={styles.stopButton}
-                onPress={() => emergencyStop().catch(() => {})}
-              >
-                <Text style={styles.stopButtonText}>STOP</Text>
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={styles.stopButton}
+              onPress={() => emergencyStop().catch(() => {})}
+            >
+              <Text style={styles.stopButtonText}>STOP</Text>
+            </TouchableOpacity>
 
             <View style={styles.controlsOverlay} pointerEvents="box-none">
               {joystickEnabled ? <JoystickLeft /> : <DPad />}
