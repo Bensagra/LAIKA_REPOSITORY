@@ -1,10 +1,14 @@
-import { StyleSheet } from 'react-native';
-import { s, f } from '../utils/scale';
+import { Platform, StyleSheet } from 'react-native';
+import { s, f, d } from '../utils/scale';
 
-const RED = '#f23b3f';
+const RED = '#E83D3D';
 const BG = '#292222';
-const PANEL = '#4b3f3f';
+const PANEL = '#453A3A';
 const TEXT_LIGHT = '#f6e7e7';
+const LOGO_LIGHT = '#F8E3E3';
+// JetBrains Mono and Viga are loaded in index.html for web; native falls back.
+export const MONO = Platform.OS === 'web' ? '"JetBrains Mono", monospace' : 'monospace';
+const VIGA = Platform.OS === 'web' ? 'Viga, sans-serif' : undefined;
 
 export const styles = StyleSheet.create({
   window: {
@@ -15,30 +19,44 @@ export const styles = StyleSheet.create({
 
   topBar: {
     position: 'absolute',
-    top: s(24),
-    left: s(24),
-    right: s(28),
+    top: d(20),
+    left: d(18),
     zIndex: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
   },
   statusPill: {
-    height: s(36),
-    minWidth: s(200),
-    paddingLeft: s(12),
-    paddingRight: s(8),
+    height: d(26),
+    paddingLeft: d(8),
+    paddingRight: d(6),
     borderWidth: 1,
     borderColor: RED,
-    borderRadius: 4,
+    borderRadius: 3,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: d(6),
   },
   statusText: {
     color: RED,
-    fontSize: f(14),
-    fontFamily: 'monospace',
+    fontSize: d(13),
+    fontFamily: MONO,
+    letterSpacing: 0.4,
+  },
+  pillMenu: {
+    marginTop: d(4),
+    borderWidth: 1,
+    borderColor: RED,
+    borderRadius: 3,
+    backgroundColor: BG,
+    overflow: 'hidden',
+  },
+  pillMenuItem: {
+    paddingVertical: d(7),
+    paddingHorizontal: d(8),
+  },
+  pillMenuText: {
+    color: RED,
+    fontSize: d(13),
+    fontFamily: MONO,
+    letterSpacing: 0.4,
   },
   authButton: {
     height: s(36),
@@ -61,25 +79,31 @@ export const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: s(24),
+    paddingTop: d(24),
   },
-  logoImage: {
-    width: s(420),
-    height: s(200),
-    marginBottom: s(50),
+  logoText: {
+    width: d(361),
+    height: d(139.5),
+    marginBottom: d(33),
+    color: LOGO_LIGHT,
+    textAlign: 'center',
+    fontFamily: VIGA,
+    fontSize: d(104.638),
+    fontWeight: '400',
+  },
+  logoAccent: {
+    color: RED,
   },
 
   buttonWrapper: {
-    width: '60%',
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: s(60),
+    gap: d(62),
   },
   mainButton: {
-    flex: 1,
-    height: s(78),
-    borderRadius: 6,
-    borderWidth: 2,
+    width: d(221.292),
+    height: d(58),
+    borderRadius: d(5.354),
+    borderWidth: d(1.785),
     borderColor: RED,
     backgroundColor: PANEL,
     justifyContent: 'center',
@@ -87,8 +111,9 @@ export const styles = StyleSheet.create({
   },
   buttonText: {
     color: RED,
-    fontSize: f(24),
-    fontFamily: 'monospace',
+    fontSize: d(16),
+    fontFamily: MONO,
+    letterSpacing: 1.2,
   },
 
   modalOverlay: {

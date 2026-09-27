@@ -158,8 +158,13 @@ function decodeH264(header: Record<string, unknown>, bytes: Uint8Array): void {
   }
 }
 
+let imageDecodeBusy = false;
+
 function drawImageBytesToCanvases(bytes: Uint8Array, mime: string): void {
   if (videoCanvases.size === 0 || typeof createImageBitmap !== 'function') return;
+  // Drop frames while one is still decoding so latency doesn't accumulate.
+  if (imageDecodeBusy) return;
+  imageDecodeBusy = true;
   const copy = bytes.slice(0);
   createImageBitmap(new Blob([copy], { type: mime }))
     .then((bmp) => {
@@ -167,7 +172,8 @@ function drawImageBytesToCanvases(bytes: Uint8Array, mime: string): void {
       cbVideoTick?.();
       if (typeof bmp.close === 'function') bmp.close();
     })
-    .catch(() => {});
+    .catch(() => {})
+    .finally(() => { imageDecodeBusy = false; });
 }
 
 function i16ToPoints(raw: Uint8Array, count: number, scale: number, offset: number[]): Float32Array {
@@ -244,7 +250,11 @@ function parseFrame(buffer: ArrayBuffer): void {
     }
     const mime = fmt === 'png' ? 'image/png' : fmt === 'webp' ? 'image/webp' : 'image/jpeg';
    
-    drawImageBytesToCanvases(payload, mime);
+    if (videoCanvases.size > 0 && typeof createImageBitmap === 'function') {
+      // Web: frames go straight to the canvas; skip the costly base64 encode.
+      drawImageBytesToCanvases(payload, mime);
+      return;
+    }
     cbVideo?.(`data:${mime};base64,${uint8ToBase64(payload)}`);
     return;
   }

@@ -6,6 +6,11 @@ body,
   margin: 0;
 }
 
+/* Lets the app's flex: 1 root fill the full viewport height. */
+#root {
+  display: flex;
+}
+
 body {
   background: #000;
   overflow: hidden;

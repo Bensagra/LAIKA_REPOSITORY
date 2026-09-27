@@ -3,13 +3,14 @@ import { AppRegistry } from 'react-native';
 // Explicitly select the screen file: `../app` resolves to app.json in Vite.
 import HomeScreen from '../app/index';
 import MisionScreen from '../app/mision';
+import DataScreen from '../app/data';
 import { AppSettingsProvider } from '../contexts/AppSettings';
 
 import './styles.css';
 
 function getRoute() {
   const route = window.location.hash.replace(/^#/, '');
-  return route === '/mision' ? '/mision' : '/';
+  return route === '/mision' || route === '/data' ? route : '/';
 }
 
 function WebApp() {
@@ -25,7 +26,9 @@ function WebApp() {
     };
   }, []);
 
-  return route === '/mision' ? <MisionScreen /> : <HomeScreen />;
+  if (route === '/mision') return <MisionScreen />;
+  if (route === '/data') return <DataScreen />;
+  return <HomeScreen />;
 }
 
 function WebRoot() {

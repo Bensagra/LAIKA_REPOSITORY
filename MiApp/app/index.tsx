@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   Alert,
-  Image,
   Modal,
   Pressable,
   Switch,
@@ -34,6 +33,7 @@ export default function HomeScreen() {
   const [password, setPassword] = useState('');
   const [authVisible, setAuthVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
+  const [pillMenuOpen, setPillMenuOpen] = useState(false);
   const [backendIp, setBackendIpState] = useState(getBackendHost());
 
   useEffect(() => {
@@ -66,37 +66,27 @@ export default function HomeScreen() {
   return (
     <View style={styles.window}>
       <View style={styles.topBar}>
-        <TouchableOpacity activeOpacity={0.8} style={styles.statusPill}>
-          <Text style={styles.statusText}>UNITREE GO2 | BATT 85%</Text>
-          <MaterialIcons name="arrow-drop-down" size={s(22)} color="#f23b3f" />
+        <TouchableOpacity activeOpacity={0.8} style={styles.statusPill} onPress={() => setPillMenuOpen((v) => !v)}>
+          <Text style={styles.statusText}>UNITREE 02 | BATT 85%</Text>
+          <MaterialIcons name="arrow-drop-down" size={s(22)} color="#E83D3D" />
         </TouchableOpacity>
 
-        <View style={styles.topBarRight}>
-          <TouchableOpacity
-            activeOpacity={0.8}
-            style={styles.authButton}
-            onPress={() => setAuthVisible(true)}
-          >
-            <MaterialIcons name={loggedUser ? 'person' : 'person-outline'} size={s(18)} color="#f23b3f" />
-            <Text style={styles.authButtonText}>{loggedUser ?? 'LOGIN'}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            activeOpacity={0.8}
-            style={styles.settingsGearButton}
-            onPress={() => setSettingsVisible(true)}
-          >
-            <MaterialIcons name="settings" size={s(20)} color="#f23b3f" />
-          </TouchableOpacity>
-        </View>
+        {pillMenuOpen && (
+          <View style={styles.pillMenu}>
+            <TouchableOpacity style={styles.pillMenuItem} onPress={() => { setPillMenuOpen(false); setAuthVisible(true); }}>
+              <Text style={styles.pillMenuText}>{loggedUser ? `CUENTA: ${loggedUser}` : 'LOGIN'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.pillMenuItem} onPress={() => { setPillMenuOpen(false); setSettingsVisible(true); }}>
+              <Text style={styles.pillMenuText}>AJUSTES</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
       <View style={styles.container}>
-        <Image
-          source={require('../imagenes/logoVacio.png')}
-          style={styles.logoImage}
-          resizeMode="contain"
-        />
+        <Text style={styles.logoText}>
+          L<Text style={styles.logoAccent}>AI</Text>KA
+        </Text>
         <View style={styles.buttonWrapper}>
           <TouchableOpacity activeOpacity={0.75} style={styles.mainButton} onPress={() => router.push('/data')}>
             <Text style={styles.buttonText}>DATA</Text>

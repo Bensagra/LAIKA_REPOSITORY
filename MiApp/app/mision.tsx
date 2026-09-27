@@ -384,60 +384,79 @@ const LidarMapView = React.memo(({
     return result;
   }, [points, count]);
 
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Web: paint on a canvas instead of hundreds of SVG DOM nodes per frame.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const ctx = canvasRef.current?.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(0, 230, 118, 0.85)';
+    for (const d of dots) ctx.fillRect(d.cx - 1.2, d.cy - 1.2, 2.4, 2.4);
+  }, [dots]);
+
+  // Transparent and label-free when empty, so the feed reads as a plain panel.
   return (
-    <View style={[{ backgroundColor: '#0a0a0a', overflow: 'hidden' }, style]}>
-      {dots.length > 0 ? (
-        <Svg width={W} height={H}>
+    <View style={[{ overflow: 'hidden' }, style]} pointerEvents="none">
+      {Platform.OS === 'web' ? (
+        React.createElement('canvas', {
+          ref: canvasRef,
+          width: W,
+          height: H,
+          style: { width: '100%', height: '100%', objectFit: 'contain', display: 'block' },
+        })
+      ) : dots.length > 0 ? (
+        <Svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`}>
           {dots.map((d, i) => (
             <Circle key={i} cx={d.cx} cy={d.cy} r={1.2} fill="#00e676" opacity={0.85} />
           ))}
         </Svg>
-      ) : (
-        <Text style={{ color: '#333', alignSelf: 'center', marginTop: H / 2 - 8, fontSize: 11 }}>
-          LIDAR
-        </Text>
+      ) : null}
+      {dots.length > 0 && (
+        <View style={{ position: 'absolute', bottom: 4, left: 6 }}>
+          <Text style={{ color: '#00e676', fontSize: 9, fontFamily: 'monospace' }}>{status}</Text>
+        </View>
       )}
-      <View style={{ position: 'absolute', bottom: 4, left: 6 }}>
-        <Text style={{ color: '#00e676', fontSize: 9, fontFamily: 'monospace' }}>{status}</Text>
-      </View>
     </View>
   );
 });
 LidarMapView.displayName = 'LidarMapView';
 
-const LiveFeed = ({
-  feed,
-  label,
+const FeedBadge = ({ status }: { status: string }) => (
+  <View style={styles.feedBadge} pointerEvents="none">
+    <Text style={styles.feedBadgeText}>{status}</Text>
+  </View>
+);
+
+const LidarFeed = ({
+  lidarData,
   status,
-  lidar = false,
+  showBadge,
 }: {
-  feed: VisualFeedState;
-  label: string;
+  lidarData: { points: Float32Array; count: number } | null;
   status: string;
-  lidar?: boolean;
+  showBadge: boolean;
 }) => (
-  <View style={[styles.videoStreamContainer, lidar && styles.lidarStreamContainer]}>
-    {feed.uri ? (
-      <Image source={{ uri: feed.uri }} style={styles.liveFeedImage} resizeMode="cover" />
-    ) : (
-      <Text style={lidar ? styles.lidarPlaceholderText : styles.videoPlaceholderText}>
-        {label}
-      </Text>
-    )}
-    <View style={styles.feedBadge}>
-      <Text style={styles.feedBadgeText}>{status}</Text>
-    </View>
+  <View style={[styles.videoStreamContainer, styles.lidarStreamContainer]}>
+    <LidarMapView
+      points={lidarData?.points ?? null}
+      count={lidarData?.count ?? 0}
+      status={status}
+      style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+    />
+    {showBadge && <FeedBadge status={status} />}
   </View>
 );
 
 const CameraFeed = ({
   feed,
-  label,
   status,
+  showBadge,
 }: {
   feed: VisualFeedState;
-  label: string;
   status: string;
+  showBadge: boolean;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -446,34 +465,33 @@ const CameraFeed = ({
     return registerVideoCanvas(canvasRef.current);
   }, []);
 
-  if (Platform.OS !== 'web') {
-    return <LiveFeed feed={feed} label={label} status={status} />;
-  }
-
   return (
     <View style={styles.videoStreamContainer}>
-      {React.createElement('canvas', {
-        ref: canvasRef,
-        id: 'laika-camera-canvas',
-        style: {
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          display: 'block',
-          backgroundColor: '#000',
-        },
-      })}
-      {!feed.lastFrameAt && (
-        <View style={styles.cameraPlaceholderOverlay} pointerEvents="none">
-          <Text style={styles.videoPlaceholderText}>{label}</Text>
-        </View>
-      )}
-      <View style={styles.feedBadge}>
-        <Text style={styles.feedBadgeText}>{status}</Text>
-      </View>
+      {Platform.OS === 'web'
+        ? React.createElement('canvas', {
+          ref: canvasRef,
+          id: 'laika-camera-canvas',
+          style: {
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            display: 'block',
+            // Until frames arrive, let the screen background show through.
+            backgroundColor: feed.lastFrameAt ? '#000' : 'transparent',
+          },
+        })
+        : feed.uri && <Image source={{ uri: feed.uri }} style={styles.liveFeedImage} resizeMode="cover" />}
+      {showBadge && <FeedBadge status={status} />}
     </View>
   );
 };
+
+const PadlockIcon = ({ open }: { open: boolean }) => (
+  <View style={{ alignItems: 'center' }}>
+    <View style={[styles.lockShackle, open && styles.lockShackleOpen]} />
+    <View style={styles.lockBody} />
+  </View>
+);
 
 function getFeedStatus(
   feed: VisualFeedState,
@@ -518,7 +536,6 @@ export default function MisionScreen() {
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [telemetry, setTelemetry] = useState<Record<string, unknown> | null>(null);
   const [lidarData, setLidarData] = useState<{ points: Float32Array; count: number } | null>(null);
-  const [activeBottomTab, setActiveBottomTab] = useState<'lidar' | 'telemetry' | 'status'>('lidar');
   const [operatorEvents, setOperatorEvents] = useState<OperatorEvent[]>([]);
   const [networkProfile, setNetworkProfile] = useState<NetworkProfileKey>('weak');
   const [mediaSettings, setMediaSettings] = useState<Omit<DogMediaSettings, 'profile'>>(() => ({
@@ -589,16 +606,29 @@ export default function MisionScreen() {
   const dragX = useRef(new Animated.Value(0)).current;
   const dragY = useRef(new Animated.Value(0)).current;
 
+  // Events can arrive many times per second over the WS; buffer them and
+  // flush in one state update so the whole screen doesn't re-render per event.
+  const pendingEventsRef = useRef<OperatorEvent[]>([]);
+  const eventFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const addOperatorEvent = useCallback((type: string, data: unknown) => {
-    setOperatorEvents((prev) => [
-      {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        ts: new Date().toLocaleTimeString('es-AR'),
-        type,
-        data,
-      },
-      ...prev,
-    ].slice(0, 80));
+    pendingEventsRef.current.unshift({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      ts: new Date().toLocaleTimeString('es-AR'),
+      type,
+      data,
+    });
+    if (eventFlushTimerRef.current) return;
+    eventFlushTimerRef.current = setTimeout(() => {
+      eventFlushTimerRef.current = null;
+      const batch = pendingEventsRef.current;
+      pendingEventsRef.current = [];
+      setOperatorEvents((prev) => [...batch, ...prev].slice(0, 80));
+    }, 500);
+  }, []);
+
+  useEffect(() => () => {
+    if (eventFlushTimerRef.current) clearTimeout(eventFlushTimerRef.current);
   }, []);
 
   const refreshCapabilities = useCallback(async () => {
@@ -1036,12 +1066,15 @@ export default function MisionScreen() {
   useEffect(() => {
     const interval = setInterval(() => {
       const bytes = netBytesRef.current;
-      setNetStats({
+      const next = {
         video: Math.round((bytes.video * 8) / 1000),
         lidar: Math.round((bytes.lidar * 8) / 1000),
         audio: Math.round((bytes.audio * 8) / 1000),
         total: Math.round(((bytes.video + bytes.lidar + bytes.audio) * 8) / 1000),
-      });
+      };
+      setNetStats((prev) => (
+        prev.video === next.video && prev.lidar === next.lidar && prev.audio === next.audio ? prev : next
+      ));
       netBytesRef.current = { video: 0, lidar: 0, audio: 0 };
       if (mediaConnected) sendRobotHeartbeat();
     }, 1000);
@@ -1062,6 +1095,7 @@ export default function MisionScreen() {
     };
     let wasActive = false;
     let lastSig = '';
+    let httpDriveInFlight = false;
 
     const sendDrive = () => {
       const keys = keyStateRef.current;
@@ -1085,7 +1119,10 @@ export default function MisionScreen() {
       z = clamp(z, -speed.angular, speed.angular);
 
       if (x || y || z) {
-        if (!sendRobotDrive(x, y, z, 360)) moveRobotAxes(x, y, z, 360).catch(() => {});
+        if (!sendRobotDrive(x, y, z, 360) && !httpDriveInFlight) {
+          httpDriveInFlight = true;
+          moveRobotAxes(x, y, z, 360).catch(() => {}).finally(() => { httpDriveInFlight = false; });
+        }
         wasActive = true;
       } else {
         if (wasActive) sendRobotDriveStop();
@@ -1217,33 +1254,20 @@ export default function MisionScreen() {
   const lidarStatus = lidarData ? `LIDAR ${lidarData.count} pts` : mediaConnected ? 'LIDAR esperando' : 'LIDAR offline';
   const safetyReadout = getSafetyReadout(telemetry);
 
-  const CamView = useCallback(
-    () => (
-      <CameraFeed
-        feed={cameraFeed}
-        label="[ CAMARA GO2 ]"
-        status={cameraStatus}
-      />
-    ),
-    [cameraFeed, cameraStatus]
+  // Elements, not components: a new component identity per render would
+  // remount the feed (and wipe the video canvas) on every state update.
+  // Status badge only on the big view; the PiP stays a clean panel.
+  const camView = (showBadge: boolean) => (
+    <CameraFeed feed={cameraFeed} status={cameraStatus} showBadge={showBadge} />
+  );
+  const lidarView = (showBadge: boolean) => (
+    <LidarFeed lidarData={lidarData} status={lidarStatus} showBadge={showBadge} />
   );
 
-  const LidarView = useCallback(
-    () => (
-      <LiveFeed
-        feed={{ uri: null, lastFrameAt: 0 }}
-        label="[ LIDAR GO2 ]"
-        status={lidarStatus}
-        lidar
-      />
-    ),
-    [lidarStatus]
-  );
-
-  const MainFeed = isCameraMain ? CamView : LidarView;
-  const PipFeed  = isCameraMain ? LidarView : CamView;
-  const LeftFeed  = splitSide === 'left'  ? PipFeed : MainFeed;
-  const RightFeed = splitSide === 'right' ? PipFeed : MainFeed;
+  const mainFeed = isCameraMain ? camView(true) : lidarView(true);
+  const pipFeed  = isCameraMain ? lidarView(false) : camView(false);
+  const leftFeed  = splitSide === 'left'  ? pipFeed : mainFeed;
+  const rightFeed = splitSide === 'right' ? pipFeed : mainFeed;
   const severityColor = (s: number) => {
     if (s <= 3) return '#22c55e';
     if (s <= 6) return '#f59e0b';
@@ -1402,10 +1426,10 @@ export default function MisionScreen() {
     return (
       <View style={styles.dragPreviewOverlay} pointerEvents="none">
         <View style={[styles.dragPreviewHalf, previewSide === 'left' ? styles.dragPreviewActive : styles.dragPreviewDim]}>
-          <PipFeed />
+          {pipFeed}
         </View>
         <View style={[styles.dragPreviewHalf, previewSide === 'right' ? styles.dragPreviewActive : styles.dragPreviewDim]}>
-          <MainFeed />
+          {mainFeed}
         </View>
       </View>
     );
@@ -1420,20 +1444,20 @@ export default function MisionScreen() {
             {isSplit ? (
               <PanGestureHandler onHandlerStateChange={onSplitStateChange}>
                 <View style={styles.splitContainer}>
-                  <View style={styles.splitHalf}><LeftFeed /></View>
-                  <View style={[styles.splitHalf, styles.splitHalfRight]}><RightFeed /></View>
+                  <View style={styles.splitHalf}>{leftFeed}</View>
+                  <View style={[styles.splitHalf, styles.splitHalfRight]}>{rightFeed}</View>
                 </View>
               </PanGestureHandler>
             ) : (
               <>
                 <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
-                  <MainFeed />
+                  {mainFeed}
                 </View>
 
                 <PanGestureHandler onGestureEvent={onGestureEvent} onHandlerStateChange={onPipStateChange}>
                   <Animated.View style={[styles.pipWindow, { transform: [{ translateX: dragX }, { translateY: dragY }] }]}>
                     <TouchableOpacity style={styles.pipTouchable} onPress={() => setIsCameraMain(!isCameraMain)} activeOpacity={0.85}>
-                      <PipFeed />
+                      {pipFeed}
                       <View style={styles.pipSwapHint}>
                         <Text style={styles.pipSwapText}>TAP TO SWAP</Text>
                       </View>
@@ -1475,111 +1499,63 @@ export default function MisionScreen() {
                     )}
                   </Pressable>
                 )}
-              </View>
 
               <View style={styles.telemetryContainer}>
                 <Text style={styles.telemetryText}>
-                  UNITREE 02  |  BATT {robotStatus ? `${robotStatus.battery}%` : '—'}  |
+                  UNITREE 02 | BATT {robotStatus ? `${robotStatus.battery}%` : '85%'} |
                 </Text>
                 <TouchableOpacity
                   activeOpacity={0.8}
                   onPress={() => setIsExtraFeature(!isExtraFeature)}
                   style={[styles.lockButton, isExtraFeature && styles.lockButtonActive]}
                 >
-                  <MaterialIcons
-                    name={isExtraFeature ? 'lock-open' : 'lock'}
-                    size={s(16)}
-                    color="#f23b3f"
-                  />
+                  <PadlockIcon open={isExtraFeature} />
                 </TouchableOpacity>
+              </View>
               </View>
 
               <View style={styles.rightHudGroup}>
-                <TouchableOpacity style={styles.captureHudButton} onPress={tomarCaptura}>
-                  <MaterialIcons name="photo-camera" size={s(17)} color="#f23b3f" />
-                  <Text style={styles.captureHudText}>CAPTURA</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.captureHudButton, grabandoPantalla && styles.recordingHudButton]}
-                  onPress={alternarGrabacionPantalla}
-                >
-                  <MaterialIcons name={grabandoPantalla ? 'stop' : 'fiber-manual-record'} size={s(17)} color={grabandoPantalla ? '#fff' : '#f23b3f'} />
-                  <Text style={[styles.captureHudText, grabandoPantalla && { color: '#fff' }]}>{grabandoPantalla ? 'DETENER' : 'GRABAR'}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.stopHudBtn}
-                  onPress={() => emergencyStop().catch(() => {})}
-                >
-                  <Text style={styles.stopHudText}> STOP</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.aiHudButton} onPress={() => setAiVisible(true)}>
-                  <MaterialIcons name="auto-awesome" size={s(18)} color="#f23b3f" />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setMenuVisible(!menuVisible)} style={styles.buildingsButton}>
-                  <Text style={styles.buildingsButtonText}>OPERATOR</Text>
+                <TouchableOpacity activeOpacity={0.8} onPress={() => setAiVisible(true)} style={styles.buildingsButton}>
+                  <Text style={styles.buildingsButtonText}>EDIFICIOS</Text>
                 </TouchableOpacity>
               </View>
           </View>
 
+            {!isSplit && (
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={styles.stopButton}
+                onPress={() => emergencyStop().catch(() => {})}
+              >
+                <Text style={styles.stopButtonText}>STOP</Text>
+              </TouchableOpacity>
+            )}
+
             <View style={styles.controlsOverlay} pointerEvents="box-none">
               {joystickEnabled ? <JoystickLeft /> : <DPad />}
 
-              <View style={styles.actionContainer}>
-                <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: '#2a1f1f' }}>
-                  {(['lidar', 'telemetry', 'status'] as const).map((tab) => (
-                    <TouchableOpacity
-                      key={tab}
-                      style={{ flex: 1, paddingVertical: s(4), alignItems: 'center',
-                        borderBottomWidth: activeBottomTab === tab ? 2 : 0,
-                        borderColor: '#f23b3f' }}
-                      onPress={() => setActiveBottomTab(tab)}
-                    >
-                      <Text style={{ color: activeBottomTab === tab ? '#f23b3f' : '#555',
-                        fontSize: s(9), fontFamily: 'monospace', letterSpacing: 1 }}>
-                        {tab === 'lidar' ? 'LIDAR' : tab === 'telemetry' ? 'TELEMETRÍA' : 'ESTADO'}
+              <View style={styles.actionBar}>
+                {([
+                  { label: 'MENU', onPress: () => setMenuVisible(!menuVisible), active: menuVisible },
+                  { label: 'WALKIE', onPress: () => Alert.alert('Walkie', 'Todavía no está disponible.') },
+                  {
+                    label: grabandoPantalla ? '● REC' : 'FOTO/VIDEO',
+                    // Tap = foto, mantener = empezar/terminar grabación.
+                    onPress: grabandoPantalla ? alternarGrabacionPantalla : tomarCaptura,
+                    onLongPress: alternarGrabacionPantalla,
+                    active: grabandoPantalla,
+                  },
+                  { label: 'LINTERNA', onPress: () => Alert.alert('Linterna', 'Todavía no está disponible.') },
+                ] as { label: string; onPress: () => void; onLongPress?: () => void; active?: boolean }[]).map((action) => (
+                  <View key={action.label} style={styles.actionButton}>
+                    <Text style={styles.actionSeparator}>|</Text>
+                    <TouchableOpacity activeOpacity={0.7} onPress={action.onPress} onLongPress={action.onLongPress}>
+                      <Text style={[styles.actionButtonText, action.active && styles.actionButtonTextActive]}>
+                        {action.label}
                       </Text>
                     </TouchableOpacity>
-                  ))}
-                </View>
-
-                {activeBottomTab === 'lidar' && (
-                  <LidarMapView
-                    points={lidarData?.points ?? null}
-                    count={lidarData?.count ?? 0}
-                    status={lidarStatus}
-                    style={{ flex: 1, width: '100%' }}
-                  />
-                )}
-                {activeBottomTab === 'telemetry' && (
-                  <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: s(4) }}>
-                    {telemetry ? (
-                      Object.entries(telemetry).slice(0, 16).map(([k, v]) => (
-                        <Text key={k} style={{ color: '#aaa', fontFamily: 'monospace', fontSize: s(8), lineHeight: s(13) }}>
-                          <Text style={{ color: '#f23b3f' }}>{k}</Text>: {JSON.stringify(v)}
-                        </Text>
-                      ))
-                    ) : (
-                      <Text style={{ color: '#444', fontFamily: 'monospace', fontSize: s(9) }}>sin datos — conectando…</Text>
-                    )}
-                  </ScrollView>
-                )}
-                {activeBottomTab === 'status' && (
-                  <View style={{ flex: 1, padding: s(6) }}>
-                    <Text style={{ color: mediaConnected ? '#00e676' : '#f23b3f', fontFamily: 'monospace', fontSize: s(9) }}>
-                      WS: {mediaConnected ? 'conectado' : 'desconectado'}
-                    </Text>
-                    {robotStatus && (
-                      <>
-                        <Text style={{ color: '#aaa', fontFamily: 'monospace', fontSize: s(9) }}>BATT: {robotStatus.battery}%</Text>
-                        <Text style={{ color: '#aaa', fontFamily: 'monospace', fontSize: s(9) }}>VEL máx: {robotStatus.speed} m/s</Text>
-                        <Text style={{ color: '#aaa', fontFamily: 'monospace', fontSize: s(9) }}>ROBOT: {robotStatus.status}</Text>
-                      </>
-                    )}
-                    <Text style={{ color: '#aaa', fontFamily: 'monospace', fontSize: s(9), marginTop: s(4) }}>
-                      LIDAR: {lidarData ? `${lidarData.count} pts` : 'sin datos'}
-                    </Text>
                   </View>
-                )}
+                ))}
               </View>
 
               {joystickEnabled ? <JoystickRight /> : <DPad />}

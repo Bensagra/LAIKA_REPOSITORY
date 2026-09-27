@@ -1,10 +1,11 @@
-import { StyleSheet } from 'react-native';
-import { s, f } from '../utils/scale';
+import { Platform, StyleSheet } from 'react-native';
+import { s, f, d } from '../utils/scale';
 
-export const PIP_W = s(253);
-export const PIP_H = s(143);
+export const PIP_W = d(170);
+export const PIP_H = d(96);
 
-const RED = '#f23b3f';
+const RED = '#E83D3D';
+const MONO = Platform.OS === 'web' ? '"JetBrains Mono", monospace' : 'monospace';
 const SCREEN_BG = '#292222';
 const PANEL_BG = '#383535';
 const CAMERA_GREY = '#626261';
@@ -50,22 +51,19 @@ export const styles = StyleSheet.create({
   },
   feedBadge: {
     position: 'absolute',
-    left: s(10),
-    bottom: s(10),
-    minWidth: s(84),
-    height: s(28),
-    borderRadius: 4,
-    backgroundColor: 'rgba(0,0,0,0.68)',
-    borderWidth: 1,
-    borderColor: RED,
+    right: d(16),
+    top: d(50),
+    height: d(18),
+    borderRadius: 3,
+    backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: s(8),
+    paddingHorizontal: d(6),
   },
   feedBadgeText: {
     color: RED,
-    fontSize: f(10),
-    fontFamily: 'monospace',
+    fontSize: d(9),
+    fontFamily: MONO,
   },
 
   splitContainer: { flex: 1, flexDirection: 'row' },
@@ -74,8 +72,8 @@ export const styles = StyleSheet.create({
 
   pipWindow: {
     position: 'absolute',
-    top: s(80),
-    left: s(26),
+    top: d(59),
+    left: d(18),
     width: PIP_W,
     height: PIP_H,
     zIndex: 20,
@@ -97,9 +95,9 @@ export const styles = StyleSheet.create({
 
   hudHeader: {
     position: 'absolute',
-    top: s(16),
-    left: s(16),
-    right: s(16),
+    top: d(18),
+    left: d(18),
+    right: d(16),
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -108,25 +106,23 @@ export const styles = StyleSheet.create({
   leftHudGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: s(12),
+    gap: d(12),
   },
   btnBack: {
-    backgroundColor: '#000',
-    height: s(42),
-    width: s(90),
-    borderRadius: 4,
-    borderWidth: 2,
+    height: d(22),
+    paddingHorizontal: d(13),
+    borderRadius: 3,
+    borderWidth: 1.5,
     borderColor: RED,
     justifyContent: 'center',
     alignItems: 'center',
   },
   btnBackActive: { backgroundColor: RED },
   btnFullScreen: {
-    backgroundColor: '#000',
-    height: s(42),
-    width: s(76),
-    borderRadius: 4,
-    borderWidth: 2,
+    height: d(22),
+    paddingHorizontal: d(13),
+    borderRadius: 3,
+    borderWidth: 1.5,
     borderColor: RED,
     justifyContent: 'center',
     alignItems: 'center',
@@ -134,50 +130,85 @@ export const styles = StyleSheet.create({
   btnFullActive: { backgroundColor: RED },
   btnText: {
     color: RED,
-    fontSize: f(15),
-    fontFamily: 'monospace',
+    fontSize: d(12),
+    fontFamily: MONO,
   },
   btnTextActive: { color: '#161616' },
 
   telemetryContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: s(10),
+    gap: d(6),
   },
   telemetryText: {
     color: RED,
-    fontSize: f(13),
-    fontFamily: 'monospace',
+    fontSize: d(12),
+    fontFamily: MONO,
+    fontWeight: '500',
   },
   lockButton: {
-    width: s(34),
-    height: s(28),
-    borderRadius: 4,
+    width: d(19),
+    height: d(14),
+    borderRadius: 2,
     borderWidth: 1,
     borderColor: RED,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  lockButtonActive: { backgroundColor: 'rgba(242, 59, 63, 0.12)' },
+  lockButtonActive: { backgroundColor: 'rgba(232, 61, 61, 0.18)' },
+  lockShackle: {
+    width: d(5),
+    height: d(3.5),
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: RED,
+    borderTopLeftRadius: d(3),
+    borderTopRightRadius: d(3),
+  },
+  lockShackleOpen: { marginLeft: d(5) },
+  lockBody: {
+    width: d(8),
+    height: d(5),
+    borderRadius: 1,
+    backgroundColor: RED,
+  },
 
   rightHudGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: s(8),
+    gap: d(8),
   },
   buildingsButton: {
-    height: s(42),
-    minWidth: s(120),
-    paddingHorizontal: s(16),
-    backgroundColor: '#cfcfcf',
-    borderRadius: 4,
+    width: d(90),
+    height: d(23),
+    backgroundColor: '#C0C0C0',
     justifyContent: 'center',
     alignItems: 'center',
   },
   buildingsButtonText: {
     color: '#171717',
-    fontSize: f(14),
-    fontFamily: 'monospace',
+    fontSize: d(12),
+    fontFamily: MONO,
+    fontWeight: '500',
+  },
+
+  stopButton: {
+    position: 'absolute',
+    top: d(169),
+    left: 0,
+    width: d(111),
+    height: d(24),
+    borderRadius: 3,
+    borderWidth: 1.5,
+    borderColor: RED,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 40,
+  },
+  stopButtonText: {
+    color: RED,
+    fontSize: d(12),
+    fontFamily: MONO,
   },
 
   switchContainer: {
@@ -207,66 +238,62 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
-    paddingBottom: s(24),
-    paddingHorizontal: s(24),
+    paddingBottom: d(25),
+    paddingHorizontal: d(27),
   },
   joystickArea: {
-    width: s(170),
-    height: s(170),
+    width: d(122),
+    height: d(122),
     justifyContent: 'center',
     alignItems: 'center',
   },
   joystickBase: {
-    width: s(170),
-    height: s(170),
-    borderRadius: s(85),
-    backgroundColor: '#dddddd',
+    width: d(122),
+    height: d(122),
+    borderRadius: d(61),
+    backgroundColor: '#D9D9D9',
     justifyContent: 'center',
     alignItems: 'center',
   },
   joystickStick: {
-    width: s(72),
-    height: s(72),
-    borderRadius: s(36),
-    backgroundColor: '#626262',
+    width: d(52),
+    height: d(52),
+    borderRadius: d(26),
+    backgroundColor: '#5F5F5F',
   },
 
-  actionContainer: {
-    flex: 1,
-    height: s(60),
-    marginHorizontal: s(16),
-    justifyContent: 'center',
-  },
-  actionScroll: {
-    backgroundColor: PANEL_BG,
+  actionBar: {
+    alignSelf: 'flex-end',
+    marginBottom: d(6),
+    width: d(485),
+    paddingTop: d(15),
+    paddingBottom: d(14),
+    paddingHorizontal: d(20),
     borderRadius: 8,
-    maxWidth: '100%',
-    alignSelf: 'center',
-  },
-  actionScrollContent: {
-    alignItems: 'center',
+    backgroundColor: 'rgba(67, 67, 67, 0.56)',
+    flexDirection: 'row',
     justifyContent: 'center',
-    paddingHorizontal: s(24),
+    alignItems: 'center',
   },
   actionButton: {
-    height: s(60),
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: s(12),
-    backgroundColor: 'transparent',
   },
   actionSeparator: {
     color: RED,
-    fontSize: f(16),
-    fontFamily: 'monospace',
-    marginRight: s(12),
+    fontSize: d(12),
+    fontFamily: MONO,
+    fontWeight: '500',
+    marginHorizontal: d(12),
   },
   actionButtonText: {
     color: RED,
-    fontSize: f(13),
-    fontFamily: 'monospace',
+    fontSize: d(12),
+    fontFamily: MONO,
+    fontWeight: '500',
+    textAlign: 'center',
   },
+  actionButtonTextActive: { color: '#F8E3E3' },
 
   pushMenu: {
     backgroundColor: SCREEN_BG,

@@ -2,7 +2,7 @@ import React from 'react';
 import { Text } from 'react-native';
 
 const symbols: Record<string, string> = {
-  'arrow-drop-down': 'v',
+  'arrow-drop-down': '▼',
   close: 'x',
   lock: 'LOCK',
   'lock-open': 'OPEN',

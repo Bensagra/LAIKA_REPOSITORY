@@ -20,8 +20,20 @@ export interface RobotStatus {
   status: string;
 }
 
+// Unreachable hosts otherwise hang for the OS TCP timeout (20s+) and block
+// the browser's per-host connection pool.
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchDog(path: string, options: RequestInit = {}) {
-  const res = await fetch(`${DOG_API_URL}${path}`, {
+  const res = await fetchWithTimeout(`${DOG_API_URL}${path}`, {
     ...options,
     headers: {
       ...DOG_HEADERS,
@@ -273,11 +285,11 @@ function crearMisionLocal(nombre: string): MisionResumen {
 
 export async function crearMision(nombre: string, id_usuario?: number): Promise<MisionResumen> {
   try {
-  const res = await fetch(`${bUrl()}/misiones`, {
+  const res = await fetchWithTimeout(`${bUrl()}/misiones`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ nombre, id_usuario }),
-  });
+  }, 2500);
   if (!res.ok) throw new Error('No se pudo crear la misión');
   const mision = await res.json();
   upsertMisionLocal(mision);
@@ -292,7 +304,7 @@ export async function crearMision(nombre: string, id_usuario?: number): Promise<
 export async function getMisiones(): Promise<MisionResumen[]> {
   const locales = getMisionesLocales();
   try {
-  const res = await fetch(`${bUrl()}/misiones`);
+  const res = await fetchWithTimeout(`${bUrl()}/misiones`, {}, 3000);
   if (!res.ok) throw new Error('No se pudieron obtener las misiones');
   const remotas: MisionResumen[] = await res.json();
   const porId = new Map<number, MisionResumen>();
@@ -322,7 +334,7 @@ export async function finalizarMision(id: number, edificios: any[], galeria: Mis
   }
 
   try {
-  await fetch(`${bUrl()}/misiones/${id}`, {
+  await fetchWithTimeout(`${bUrl()}/misiones/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ edificios, galeria }),
@@ -333,7 +345,7 @@ export async function finalizarMision(id: number, edificios: any[], galeria: Mis
 export async function eliminarMision(id: number): Promise<void> {
   setMisionesLocales(getMisionesLocales().filter((m) => m.id_mision !== id));
   try {
-  await fetch(`${bUrl()}/misiones/${id}`, { method: 'DELETE' });
+  await fetchWithTimeout(`${bUrl()}/misiones/${id}`, { method: 'DELETE' });
   } catch {}
 }
 
@@ -342,7 +354,7 @@ export async function renombrarMision(id: number, nombre: string): Promise<void>
     getMisionesLocales().map((m) => (m.id_mision === id ? { ...m, nombre } : m))
   );
   try {
-  await fetch(`${bUrl()}/misiones/${id}/nombre`, {
+  await fetchWithTimeout(`${bUrl()}/misiones/${id}/nombre`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ nombre }),

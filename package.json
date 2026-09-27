@@ -1,7 +1,11 @@
 {
   "scripts": {
     "web:noexpo": "npm --prefix MiApp run web:noexpo",
-    "start": "npm --prefix MiApp run web:noexpo"
+    "start": "npm --prefix MiApp run web:noexpo",
+    "prod": "npm --prefix MiApp run web:prod"
   },
-  "private": true
+  "private": true,
+  "dependencies": {
+    "vite": "^8.3.1"
+  }
 }
