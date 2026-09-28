@@ -67,6 +67,14 @@ export const NETWORK_PROFILES = {
 
 export type NetworkProfileKey = keyof typeof NETWORK_PROFILES;
 
+// LiDAR detail is chosen on its own (home settings), independent of the camera
+// network profile. Keyed by max points per frame, the value the UI stores.
+export const LIDAR_QUALITY: Record<number, { label: string; hz: number; quantizationCm: number; compression: number }> = {
+  2500: { label: 'BAJA', hz: 0.7, quantizationCm: 2.0, compression: 6 },
+  8000: { label: 'MEDIA', hz: 1.5, quantizationCm: 1.0, compression: 5 },
+  30000: { label: 'ALTA', hz: 2, quantizationCm: 0.5, compression: 5 },
+};
+
 export interface DogMediaSettings {
   video: boolean;
   lidar: boolean;
@@ -200,14 +208,15 @@ export async function configureDogMedia(settings: DogMediaSettings): Promise<voi
     uplink_max_kbps: profile.uplinkMaxKbps,
   }, 2000);
 
+  const lidarQuality = LIDAR_QUALITY[lidarMaxPoints];
   await sendDogCommand('set_lidar_decoder', { decoder: 'native' }, 2000);
   await sendDogCommand('set_lidar', {
     enabled: settings.lidar,
     subscribe: true,
-    media_hz: profile.lidarHz,
+    media_hz: lidarQuality?.hz ?? profile.lidarHz,
     max_points: lidarMaxPoints,
-    compression_level: profile.lidarCompression,
-    quantization_cm: profile.lidarQuantizationCm,
+    compression_level: lidarQuality?.compression ?? profile.lidarCompression,
+    quantization_cm: lidarQuality?.quantizationCm ?? profile.lidarQuantizationCm,
   }, 2000);
 
   await sendDogCommand('set_audio', {

@@ -810,7 +810,7 @@ export default function MisionScreen() {
       cameraQuality: preset.cameraQuality,
       cameraWidth: preset.cameraWidth,
       cameraBitrateKbps: preset.cameraBitrateKbps,
-      lidarMaxPoints: preset.lidarMaxPoints,
+      // LiDAR detail stays as chosen in the home settings (LIDAR_QUALITY).
     };
     setNetworkProfile(profile);
     setMediaSettings(next);

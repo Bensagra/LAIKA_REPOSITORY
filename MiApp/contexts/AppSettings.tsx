@@ -31,7 +31,7 @@ const AppSettingsContext = createContext<AppSettings>({
   setRobotSpeed: () => {},
   videoResolution: 640,
   setVideoResolution: () => {},
-  lidarMaxPoints: 2500,
+  lidarMaxPoints: 30000,
   setLidarMaxPoints: () => {},
 });
 
@@ -41,7 +41,7 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
   const [misionActiva, setMisionActiva] = useState<MisionActiva | null>(null);
   const [robotSpeed, setRobotSpeed] = useState(50);
   const [videoResolution, setVideoResolution] = useState(640);
-  const [lidarMaxPoints, setLidarMaxPoints] = useState(2500);
+  const [lidarMaxPoints, setLidarMaxPoints] = useState(30000);
   return (
     <AppSettingsContext.Provider value={{
       joystickEnabled, setJoystickEnabled,
