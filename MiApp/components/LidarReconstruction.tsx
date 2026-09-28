@@ -14,13 +14,12 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 //  - colors are RGBA per point, alpha 0 = no camera colour for that point;
 //  - header.pose {x, y, yaw} is the robot pose, header.path its trail (keyframes).
 //
-// Realism: each occupied 5 cm cell becomes a "surfel" (small disc) oriented by
+// Realism: each occupied cell (server voxel size, 8 cm by default) becomes a "surfel" (small disc) oriented by
 // the surface normal estimated from its neighbours (PCA), so walls and floors
 // read as smooth lit surfaces. Isolated cells (sensor noise) are hidden, and
 // ambient occlusion (GTAO) + filmic tone mapping give depth to corners.
 
-const VOXEL_M = 0.05;
-const SURFEL_RADIUS = VOXEL_M * 0.8; // > half the cell diagonal: discs overlap, no gaps
+const DEFAULT_VOXEL_M = 0.08; // server map voxel size (mission manifest: voxel_size_m)
 const MAX_CELLS = 150000;
 const NOISE_FILTER_MIN_CELLS = 3000; // only drop isolated cells once the map is dense
 const KEY_OFFSET = 1 << 15;
@@ -119,12 +118,18 @@ interface MapState {
 
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 
-export default function LidarReconstruction({ sinkRef }: { sinkRef: React.MutableRefObject<LidarSink | null> }) {
+export default function LidarReconstruction({ sinkRef, voxelSize = DEFAULT_VOXEL_M }: {
+  sinkRef: React.MutableRefObject<LidarSink | null>;
+  /** Cell size in metres; match the server's voxel size so surfaces close up. */
+  voxelSize?: number;
+}) {
   const hostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    const VOXEL_M = voxelSize;
+    const SURFEL_RADIUS = VOXEL_M * 0.8; // > half the cell diagonal: discs overlap, no gaps
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -416,7 +421,7 @@ export default function LidarReconstruction({ sinkRef }: { sinkRef: React.Mutabl
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [sinkRef]);
+  }, [sinkRef, voxelSize]);
 
   return React.createElement('div', {
     ref: hostRef,

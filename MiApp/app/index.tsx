@@ -19,6 +19,7 @@ import 'react-native-gesture-handler';
 import { styles } from '../styles/index';
 import { useAppSettings } from '../contexts/AppSettings';
 import { s } from '../utils/scale';
+import { startServerMission } from '../services/missions';
 
 const BACKEND_IP_KEY = 'laika.backendIp';
 
@@ -95,12 +96,18 @@ export default function HomeScreen() {
             activeOpacity={0.75}
             style={styles.mainButton}
             onPress={async () => {
-              try {
-                const fecha = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
-                const mision = await crearMision(`Misión ${fecha}`);
-                setMisionActiva({ id: mision.id_mision, nombre: mision.nombre });
-              } catch {
-                setMisionActiva({ id: 0, nombre: 'Misión local' });
+              const fecha = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+              const nombre = `Misión ${fecha}`;
+              // Backend (:3000) mission and robot-server recording start together.
+              const [local, server] = await Promise.allSettled([crearMision(nombre), startServerMission(nombre)]);
+              const serverMissionId = server.status === 'fulfilled' ? server.value.mission_id : null;
+              if (local.status === 'fulfilled') {
+                setMisionActiva({ id: local.value.id_mision, nombre: local.value.nombre, serverMissionId });
+              } else {
+                setMisionActiva({ id: 0, nombre: 'Misión local', serverMissionId });
+              }
+              if (server.status === 'rejected') {
+                Alert.alert('Grabación', `No se pudo iniciar la grabación en el servidor: ${server.reason instanceof Error ? server.reason.message : String(server.reason)}`);
               }
               router.push('/mision');
             }}

@@ -3,6 +3,8 @@ import React, { createContext, useContext, useState } from 'react';
 interface MisionActiva {
   id: number;
   nombre: string;
+  /** Recording on the robot server (camera/thermal/LiDAR), if it could start. */
+  serverMissionId?: string | null;
 }
 
 interface AppSettings {

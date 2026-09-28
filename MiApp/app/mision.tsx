@@ -23,6 +23,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 
 import { styles } from '../styles/misionStyles';
 import LidarReconstruction, { LidarSink, LidarSinkFrame } from '../components/LidarReconstruction';
+import { formatMissionTime, getServerMission, ServerMission, stopServerMission } from '../services/missions';
 import { s } from '../utils/scale';
 import { useAppSettings } from '../contexts/AppSettings';
 import {
@@ -607,6 +608,8 @@ export default function MisionScreen() {
   const [robotStatus, setRobotStatus] = useState<RobotStatus | null>(null);
 
   const [expandedTile, setExpandedTile] = useState<FeedTileKey | null>(null);
+  const [savingExit, setSavingExit] = useState(false);
+  const [serverRecording, setServerRecording] = useState<ServerMission | null>(null);
   const lastTapRef = useRef<{ key: FeedTileKey | null; at: number }>({ key: null, at: 0 });
   const [menuVisible, setMenuVisible] = useState(false);
   const [homeHovered, setHomeHovered] = useState(false);
@@ -1070,6 +1073,18 @@ export default function MisionScreen() {
     }, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  // Server recording progress: poll every 3 s while the mission is active, to
+  // surface recorder errors or streams that stopped arriving.
+  const serverMissionId = misionActiva?.serverMissionId ?? null;
+  useEffect(() => {
+    if (!serverMissionId) return;
+    let alive = true;
+    const poll = () => getServerMission(serverMissionId).then((m) => { if (alive) setServerRecording(m); }).catch(() => {});
+    poll();
+    const interval = setInterval(poll, 3000);
+    return () => { alive = false; clearInterval(interval); };
+  }, [serverMissionId]);
 
   useEffect(() => {
     const disconnect = connectRobotWS({
@@ -1602,6 +1617,13 @@ export default function MisionScreen() {
                 >
                   <PadlockIcon open={isExtraFeature} />
                 </TouchableOpacity>
+                {serverRecording && (
+                  <Text style={[styles.telemetryText, serverRecording.status !== 'recording' && { color: '#ffb347' }]}>
+                    {serverRecording.status === 'recording'
+                      ? `● REC ${formatMissionTime(serverRecording.duration_s)}`
+                      : `REC ${serverRecording.status}${serverRecording.error ? `: ${stringifyShort(serverRecording.error, 30)}` : ''}`}
+                  </Text>
+                )}
               </View>
               </View>
 
@@ -1936,7 +1958,13 @@ export default function MisionScreen() {
             <Text style={[styles.aiModalTitle, { marginBottom: 10 }]}>¿Salir de la misión?</Text>
             <Text style={{ color: '#8b7474', fontFamily: 'monospace', fontSize: 13, marginBottom: 20 }}>
               Se guardarán los edificios y {galeria.length} archivo(s) de la galería.
+              {misionActiva?.serverMissionId ? ' También se finaliza la grabación de cámara, térmica y LiDAR en el servidor (puede tardar).' : ''}
             </Text>
+            {savingExit && (
+              <Text style={{ color: '#E83D3D', fontFamily: 'monospace', fontSize: 12, marginBottom: 12 }}>
+                Guardando videos y mapa en el servidor…
+              </Text>
+            )}
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <TouchableOpacity
                 style={[styles.analyzeButton, { flex: 1, borderColor: '#433838' }]}
@@ -1946,10 +1974,24 @@ export default function MisionScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.analyzeButton, { flex: 1 }]}
+                disabled={savingExit}
                 onPress={async () => {
                   if (grabandoPantalla) {
                     Alert.alert('Grabación en curso', 'Detené la grabación y esperá a que se guarde antes de salir de la misión.');
                     return;
+                  }
+                  const serverMissionId = misionActiva?.serverMissionId;
+                  if (serverMissionId) {
+                    // /stop waits until videos and map are closed; it can be repeated.
+                    setSavingExit(true);
+                    try {
+                      await stopServerMission(serverMissionId);
+                    } catch (error) {
+                      setSavingExit(false);
+                      Alert.alert('Grabación', `No se pudo finalizar la grabación en el servidor: ${error instanceof Error ? error.message : String(error)}. Podés reintentar.`);
+                      return;
+                    }
+                    setSavingExit(false);
                   }
                   setExitConfirmVisible(false);
                   if (misionActiva && misionActiva.id > 0) {
@@ -1967,7 +2009,7 @@ export default function MisionScreen() {
                   router.replace('/');
                 }}
               >
-                <Text style={styles.analyzeButtonText}>SALIR Y GUARDAR</Text>
+                <Text style={styles.analyzeButtonText}>{savingExit ? 'GUARDANDO…' : 'SALIR Y GUARDAR'}</Text>
               </TouchableOpacity>
             </View>
           </Pressable>

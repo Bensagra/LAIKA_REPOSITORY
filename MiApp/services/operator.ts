@@ -151,7 +151,7 @@ function authHeaders(json = false) {
   };
 }
 
-async function fetchDog(path: string, options: RequestInit = {}, timeoutMs = 8000) {
+export async function fetchDog(path: string, options: RequestInit = {}, timeoutMs = 8000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -173,7 +173,7 @@ async function fetchDog(path: string, options: RequestInit = {}, timeoutMs = 800
   }
 }
 
-async function fetchDogJson<T>(path: string, options: RequestInit = {}, timeoutMs = 8000): Promise<T> {
+export async function fetchDogJson<T>(path: string, options: RequestInit = {}, timeoutMs = 8000): Promise<T> {
   const res = await fetchDog(path, options, timeoutMs);
   return res.json() as Promise<T>;
 }
@@ -337,7 +337,7 @@ export function formatDogMapLabel(map: DogMapMetadata) {
   return map.is_latest ? `Mapa actual · ${points} pts` : `${when} · ${points} pts`;
 }
 
-function decodeFloatPayload(base64 = '', format = '', components: number, count: number) {
+export function decodeFloatPayload(base64 = '', format = '', components: number, count: number) {
   let bytes: Uint8Array<ArrayBufferLike> = base64ToBytes(base64);
   if (String(format).endsWith('_zlib')) {
     bytes = inflate(bytes);
