@@ -22,6 +22,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import * as ScreenOrientation from 'expo-screen-orientation';
 
 import { styles } from '../styles/misionStyles';
+import LidarReconstruction, { LidarSink, LidarSinkFrame } from '../components/LidarReconstruction';
 import { s } from '../utils/scale';
 import { useAppSettings } from '../contexts/AppSettings';
 import {
@@ -42,7 +43,9 @@ import {
 import { saveMissionVideo } from '../services/misionMedia';
 import {
   connectRobotWS,
+  registerThermalCanvas,
   registerVideoCanvas,
+  ThermalFrameMeta,
   requestRobotSpeedProfile,
   sendRobotDrive,
   sendRobotDriveStop,
@@ -422,22 +425,43 @@ const FeedBadge = ({ status }: { status: string }) => (
   </View>
 );
 
+type LidarFrame = { points: Float32Array; count: number; colors: Uint8Array | null };
+
+// Map-protocol fields from the LiDAR frame header (keyframe/delta, robot pose).
+function lidarSinkFrame(points: Float32Array, colors: Uint8Array | null, header: Record<string, any> | undefined): LidarSinkFrame {
+  const pose = header?.pose;
+  return {
+    points,
+    colors,
+    mode: String(header?.mode ?? 'delta'),
+    pose: pose ? { x: Number(pose.x), y: Number(pose.y), yaw: Number(pose.yaw ?? 0) } : null,
+    path: Array.isArray(header?.path) ? header!.path : null,
+  };
+}
+
 const LidarFeed = ({
   lidarData,
+  sinkRef,
   status,
   showBadge,
 }: {
-  lidarData: { points: Float32Array; count: number } | null;
+  lidarData: LidarFrame | null;
+  sinkRef: React.MutableRefObject<LidarSink | null>;
   status: string;
   showBadge: boolean;
 }) => (
   <View style={[styles.videoStreamContainer, styles.lidarStreamContainer]}>
-    <LidarMapView
-      points={lidarData?.points ?? null}
-      count={lidarData?.count ?? 0}
-      status={status}
-      style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
-    />
+    {Platform.OS === 'web' ? (
+      // Solid voxel map (three.js); frames are pushed straight into sinkRef.
+      <LidarReconstruction sinkRef={sinkRef} />
+    ) : (
+      <LidarMapView
+        points={lidarData?.points ?? null}
+        count={lidarData?.count ?? 0}
+        status={status}
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+      />
+    )}
     {showBadge && <FeedBadge status={status} />}
   </View>
 );
@@ -489,7 +513,65 @@ const FEED_LABEL_CORNERS = [
   { left: 8, top: 8 },
 ];
 
-// Thermal/IR cameras have no stream from the robot yet.
+const THERMAL_STALE_MS = 3000;
+
+interface ThermalInfo {
+  meta: ThermalFrameMeta | null;
+  lastFrameAt: number;
+  stale: boolean;
+  fps: number;
+}
+
+const fmtC = (v: number | undefined) => (typeof v === 'number' && Number.isFinite(v) ? `${v.toFixed(1)}°` : '--');
+
+// SenXor heat map from the server (boxes already drawn into the JPEG).
+const ThermalFeed = ({ info }: { info: ThermalInfo }) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !canvasRef.current) return;
+    return registerThermalCanvas(canvasRef.current);
+  }, []);
+
+  const hasFrame = info.lastFrameAt > 0;
+  const temp = info.meta?.temperature;
+  // Detection is only meaningful while frames are fresh.
+  const person = !info.stale && !!info.meta?.detection?.person_present;
+
+  return (
+    <View style={[styles.videoStreamContainer, styles.noSignalFeed]}>
+      {Platform.OS === 'web' && React.createElement('canvas', {
+        ref: canvasRef,
+        style: {
+          width: '100%',
+          height: '100%',
+          objectFit: 'contain',
+          display: 'block',
+          opacity: info.stale ? 0.35 : 1,
+        },
+      })}
+      {(!hasFrame || info.stale) && (
+        <View style={styles.cameraPlaceholderOverlay} pointerEvents="none">
+          <Text style={styles.noSignalText}>{hasFrame ? 'SEÑAL INTERRUMPIDA' : 'SIN SEÑAL'}</Text>
+        </View>
+      )}
+      {hasFrame && !info.stale && (
+        <View style={styles.thermalReadout} pointerEvents="none">
+          <Text style={styles.thermalReadoutText}>
+            min {fmtC(temp?.min_c)} · máx {fmtC(temp?.max_c)} · centro {fmtC(temp?.center_c)}
+          </Text>
+          {person && (
+            <View style={styles.thermalPersonBadge}>
+              <Text style={styles.thermalPersonText}>POSIBLE PERSONA</Text>
+            </View>
+          )}
+        </View>
+      )}
+    </View>
+  );
+};
+
+// IR camera has no stream from the robot yet.
 const NoSignalFeed = () => (
   <View style={[styles.videoStreamContainer, styles.noSignalFeed]}>
     <Text style={styles.noSignalText}>SIN SEÑAL</Text>
@@ -541,7 +623,13 @@ export default function MisionScreen() {
   const [mediaConnected, setMediaConnected] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [telemetry, setTelemetry] = useState<Record<string, unknown> | null>(null);
-  const [lidarData, setLidarData] = useState<{ points: Float32Array; count: number } | null>(null);
+  const [lidarData, setLidarData] = useState<LidarFrame | null>(null);
+  const lidarSinkRef = useRef<LidarSink | null>(null);
+  const [thermalInfo, setThermalInfo] = useState<ThermalInfo>({ meta: null, lastFrameAt: 0, stale: false, fps: 0 });
+  const thermalLatestRef = useRef<ThermalFrameMeta | null>(null);
+  const thermalUiAtRef = useRef(0);
+  const thermalFramesRef = useRef(0);
+  const thermalStaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [operatorEvents, setOperatorEvents] = useState<OperatorEvent[]>([]);
   const [networkProfile, setNetworkProfile] = useState<NetworkProfileKey>('weak');
   const [mediaSettings, setMediaSettings] = useState<Omit<DogMediaSettings, 'profile'>>(() => ({
@@ -599,7 +687,7 @@ export default function MisionScreen() {
   const keyStateRef = useRef<Set<string>>(new Set());
   const mediaSettingsRef = useRef(mediaSettings);
   const networkProfileRef = useRef(networkProfile);
-  const lidarRecordRef = useRef<{ recording: boolean; startedAt: number; frames: { t: number; points: Float32Array; count: number }[] }>({
+  const lidarRecordRef = useRef<{ recording: boolean; startedAt: number; frames: ({ t: number; header?: Record<string, any> } & LidarFrame)[] }>({
     recording: false,
     startedAt: 0,
     frames: [],
@@ -866,6 +954,7 @@ export default function MisionScreen() {
 
   const clearLiveLidar = useCallback(() => {
     setLidarData(null);
+    lidarSinkRef.current?.clear();
     lidarRecordRef.current.frames = [];
     setRecordedFrames(0);
     addOperatorEvent('lidar_clear', 'mapa en vivo limpiado');
@@ -890,13 +979,16 @@ export default function MisionScreen() {
     const frames = [...lidarRecordRef.current.frames];
     if (!frames.length) return;
     setLidarData(null);
+    lidarSinkRef.current?.clear();
     addOperatorEvent('lidar_replay', `${frames.length} cuadros`);
     const started = Date.now();
     let index = 0;
     const tick = () => {
       const elapsed = Date.now() - started;
       while (index < frames.length && frames[index].t <= elapsed) {
-        setLidarData({ points: frames[index].points, count: frames[index].count });
+        const f = frames[index];
+        lidarSinkRef.current?.addFrame(lidarSinkFrame(f.points, f.colors, f.header));
+        setLidarData({ points: f.points, count: f.count, colors: f.colors });
         index += 1;
       }
       if (index < frames.length) setTimeout(tick, 30);
@@ -1026,17 +1118,23 @@ export default function MisionScreen() {
           }));
         }
       },
-      onLidar: (points, count) => {
+      onLidar: (points, count, meta) => {
         const now = Date.now();
-        if (now - lastLidarRef.current < 400) return;
-        lastLidarRef.current = now;
-        setLidarData({ points, count });
+        const colors = meta?.colors ?? null;
+        const header = meta?.header as Record<string, any> | undefined;
+        // Every frame goes to the 3D map: deltas only carry new points, so a
+        // dropped frame would leave a permanent hole.
+        lidarSinkRef.current?.addFrame(lidarSinkFrame(points, colors, header));
         const rec = lidarRecordRef.current;
         if (rec.recording) {
-          rec.frames.push({ t: now - rec.startedAt, points: points.slice(0), count });
+          rec.frames.push({ t: now - rec.startedAt, points: points.slice(0), count, colors: colors?.slice(0) ?? null, header });
           if (rec.frames.length > 1200) rec.frames.shift();
-          setRecordedFrames(rec.frames.length);
         }
+        // UI state (status text, native 2D view) only needs a few updates/s.
+        if (now - lastLidarRef.current < 400) return;
+        lastLidarRef.current = now;
+        setLidarData({ points, count, colors });
+        if (rec.recording) setRecordedFrames(rec.frames.length);
       },
       onStatus: (connected) => {
         setMediaConnected(connected);
@@ -1063,6 +1161,20 @@ export default function MisionScreen() {
         const key = stream === 'lidar' ? 'lidar' : stream === 'audio' ? 'audio' : 'video';
         netBytesRef.current[key] += bytes;
       },
+      onThermal: (meta) => {
+        // The canvas is painted by robotSocket at full rate (~8 fps); the
+        // readout only needs a few updates per second.
+        const now = Date.now();
+        thermalFramesRef.current += 1;
+        thermalLatestRef.current = meta;
+        if (thermalStaleTimerRef.current) clearTimeout(thermalStaleTimerRef.current);
+        thermalStaleTimerRef.current = setTimeout(() => {
+          setThermalInfo((prev) => ({ ...prev, stale: true }));
+        }, THERMAL_STALE_MS);
+        if (now - thermalUiAtRef.current < 300) return;
+        thermalUiAtRef.current = now;
+        setThermalInfo((prev) => ({ ...prev, meta, lastFrameAt: now, stale: false }));
+      },
     });
     return disconnect;
   }, [addOperatorEvent, refreshCapabilities, refreshFaces, refreshMaps, refreshMesh, updateAutonomyFromMessage]);
@@ -1080,8 +1192,21 @@ export default function MisionScreen() {
         prev.video === next.video && prev.lidar === next.lidar && prev.audio === next.audio ? prev : next
       ));
       netBytesRef.current = { video: 0, lidar: 0, audio: 0 };
-      if (mediaConnected) sendRobotHeartbeat();
+      const thermalFps = thermalFramesRef.current;
+      thermalFramesRef.current = 0;
+      setThermalInfo((prev) => (prev.fps === thermalFps ? prev : { ...prev, fps: thermalFps }));
     }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => () => {
+    if (thermalStaleTimerRef.current) clearTimeout(thermalStaleTimerRef.current);
+  }, []);
+
+  // Keep-alive for the robot's control watchdog (same 500 ms as benyi2.html).
+  useEffect(() => {
+    if (!mediaConnected) return;
+    const interval = setInterval(() => sendRobotHeartbeat(), 500);
     return () => clearInterval(interval);
   }, [mediaConnected]);
 
@@ -1123,9 +1248,9 @@ export default function MisionScreen() {
       z = clamp(z, -speed.angular, speed.angular);
 
       if (x || y || z) {
-        if (!sendRobotDrive(x, y, z, 360) && !httpDriveInFlight) {
+        if (!sendRobotDrive(x, y, z, 320) && !httpDriveInFlight) {
           httpDriveInFlight = true;
-          moveRobotAxes(x, y, z, 360).catch(() => {}).finally(() => { httpDriveInFlight = false; });
+          moveRobotAxes(x, y, z, 320).catch(() => {}).finally(() => { httpDriveInFlight = false; });
         }
         wasActive = true;
       } else {
@@ -1139,7 +1264,7 @@ export default function MisionScreen() {
       }
     };
 
-    const loop = setInterval(sendDrive, 90);
+    const loop = setInterval(sendDrive, 80);
 
     if (Platform.OS !== 'web') {
       return () => clearInterval(loop);
@@ -1213,6 +1338,20 @@ export default function MisionScreen() {
 
   const cameraStatus = getFeedStatus(cameraFeed, 'CAM', mediaConnected, mediaError, Date.now());
   const lidarStatus = lidarData ? `LIDAR ${lidarData.count} pts` : mediaConnected ? 'LIDAR esperando' : 'LIDAR offline';
+  // Camera state reported by the Raspy gateway: telemetry.media.thermal.
+  const thermalTelemetry = ((telemetry?.media as any)?.thermal ?? null) as
+    { connected?: boolean; error?: string | null } | null;
+  const thermalStatus = !mediaConnected
+    ? 'offline'
+    : thermalInfo.lastFrameAt && !thermalInfo.stale
+      ? `live · ${thermalInfo.fps} fps`
+      : thermalTelemetry?.error
+        ? `error: ${stringifyShort(thermalTelemetry.error, 40)}`
+        : thermalTelemetry?.connected === false
+          ? 'cámara desconectada'
+          : thermalInfo.stale
+            ? 'señal interrumpida'
+            : 'esperando';
   const safetyReadout = getSafetyReadout(telemetry);
 
   // Elements, not components: a new component identity per render would
@@ -1228,9 +1367,9 @@ export default function MisionScreen() {
       key: 'lidar',
       label: 'LIDAR',
       status: lidarStatus,
-      content: <LidarFeed lidarData={lidarData} status={lidarStatus} showBadge={false} />,
+      content: <LidarFeed lidarData={lidarData} sinkRef={lidarSinkRef} status={lidarStatus} showBadge={false} />,
     },
-    { key: 'thermal', label: 'TÉRMICA', status: 'sin señal', content: <NoSignalFeed /> },
+    { key: 'thermal', label: 'TÉRMICA', status: thermalStatus, content: <ThermalFeed info={thermalInfo} /> },
     { key: 'ir', label: 'INFRARROJA', status: 'sin señal', content: <NoSignalFeed /> },
   ];
   const severityColor = (s: number) => {

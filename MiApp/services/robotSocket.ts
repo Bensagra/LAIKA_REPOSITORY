@@ -1,5 +1,5 @@
 import { inflate } from 'pako';
-import { DOG_API_URL, DOG_ROBOT_ID, DOG_TOKEN } from './api';
+import { activateDogControl, DOG_API_URL, DOG_ROBOT_ID, DOG_TOKEN } from './api';
 
 export type VideoFrameCallback = (dataUri: string) => void;
 export type VideoTickCallback = () => void;
@@ -19,6 +19,22 @@ export type MeshReadyCallback = (data: Record<string, unknown>) => void;
 export type CommandAckCallback = (data: Record<string, unknown>) => void;
 export type AudioCallback = (data: Record<string, unknown>) => void;
 export type NetBytesCallback = (stream: string, bytes: number) => void;
+// Server-side SenXor thermal frames (see the "Cámara térmica en vivo" contract):
+// JPEG heat map with boxes already drawn, plus temperatures/detection in the header.
+export type ThermalFrameMeta = {
+  seq?: number;
+  ts?: number;
+  width?: number;
+  height?: number;
+  source_width?: number;
+  source_height?: number;
+  temperature?: { min_c?: number; max_c?: number; center_c?: number };
+  detection?: {
+    person_present?: boolean;
+    regions?: { x: number; y: number; width: number; height: number; area?: number; max_c?: number }[];
+  };
+};
+export type ThermalCallback = (meta: ThermalFrameMeta) => void;
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -36,6 +52,7 @@ let cbMeshReady: MeshReadyCallback | null = null;
 let cbCommandAck: CommandAckCallback | null = null;
 let cbAudio: AudioCallback | null = null;
 let cbNetBytes: NetBytesCallback | null = null;
+let cbThermal: ThermalCallback | null = null;
 
 function uint8ToBase64(bytes: Uint8Array): string {
   const chunk = 8192;
@@ -47,10 +64,16 @@ function uint8ToBase64(bytes: Uint8Array): string {
 }
 
 const videoCanvases = new Set<HTMLCanvasElement>();
+const thermalCanvases = new Set<HTMLCanvasElement>();
 
 export function registerVideoCanvas(canvas: HTMLCanvasElement): () => void {
   videoCanvases.add(canvas);
   return () => { videoCanvases.delete(canvas); };
+}
+
+export function registerThermalCanvas(canvas: HTMLCanvasElement): () => void {
+  thermalCanvases.add(canvas);
+  return () => { thermalCanvases.delete(canvas); };
 }
 
 export function webCodecsAvailable(): boolean {
@@ -58,8 +81,8 @@ export function webCodecsAvailable(): boolean {
   return typeof g.VideoDecoder === 'function' && typeof g.EncodedVideoChunk === 'function';
 }
 
-function drawToCanvases(source: CanvasImageSource, w: number, h: number): void {
-  videoCanvases.forEach((canvas) => {
+function drawToCanvases(source: CanvasImageSource, w: number, h: number, canvases: Set<HTMLCanvasElement> = videoCanvases): void {
+  canvases.forEach((canvas) => {
     if (w && h && (canvas.width !== w || canvas.height !== h)) {
       canvas.width = w;
       canvas.height = h;
@@ -158,22 +181,54 @@ function decodeH264(header: Record<string, unknown>, bytes: Uint8Array): void {
   }
 }
 
-let imageDecodeBusy = false;
+// One-frame queue per image stream: while a frame decodes, only the newest
+// incoming frame is kept, so latency never builds up and nothing stale is drawn.
+interface ImageJob { bytes: Uint8Array; mime: string; onDrawn?: () => void }
+interface ImageQueue { canvases: Set<HTMLCanvasElement>; busy: boolean; pending: ImageJob | null; gen: number }
 
-function drawImageBytesToCanvases(bytes: Uint8Array, mime: string): void {
-  if (videoCanvases.size === 0 || typeof createImageBitmap !== 'function') return;
-  // Drop frames while one is still decoding so latency doesn't accumulate.
-  if (imageDecodeBusy) return;
-  imageDecodeBusy = true;
-  const copy = bytes.slice(0);
-  createImageBitmap(new Blob([copy], { type: mime }))
+const videoQueue: ImageQueue = { canvases: videoCanvases, busy: false, pending: null, gen: 0 };
+const thermalQueue: ImageQueue = { canvases: thermalCanvases, busy: false, pending: null, gen: 0 };
+
+function runImageJob(queue: ImageQueue, job: ImageJob): void {
+  queue.busy = true;
+  const gen = queue.gen;
+  createImageBitmap(new Blob([job.bytes as BlobPart], { type: job.mime }))
     .then((bmp) => {
-      drawToCanvases(bmp, bmp.width, bmp.height);
-      cbVideoTick?.();
+      if (gen === queue.gen) {
+        drawToCanvases(bmp, bmp.width, bmp.height, queue.canvases);
+        job.onDrawn?.();
+      }
       if (typeof bmp.close === 'function') bmp.close();
     })
     .catch(() => {})
-    .finally(() => { imageDecodeBusy = false; });
+    .finally(() => {
+      queue.busy = false;
+      const next = queue.pending;
+      queue.pending = null;
+      if (next && gen === queue.gen) runImageJob(queue, next);
+    });
+}
+
+/** Returns false when there is no canvas to draw into (e.g. native). */
+function enqueueImage(queue: ImageQueue, bytes: Uint8Array, mime: string, onDrawn?: () => void): boolean {
+  if (queue.canvases.size === 0 || typeof createImageBitmap !== 'function') return false;
+  const job = { bytes: bytes.slice(0), mime, onDrawn };
+  if (queue.busy) queue.pending = job;
+  else runImageJob(queue, job);
+  return true;
+}
+
+// Drop queued frames on disconnect so nothing from the old session is drawn.
+function invalidateImageQueues(): void {
+  for (const queue of [videoQueue, thermalQueue]) {
+    queue.gen++;
+    queue.pending = null;
+  }
+}
+
+function mimeFor(format: unknown): string {
+  const fmt = String(format ?? '');
+  return fmt === 'png' ? 'image/png' : fmt === 'webp' ? 'image/webp' : 'image/jpeg';
 }
 
 function i16ToPoints(raw: Uint8Array, count: number, scale: number, offset: number[]): Float32Array {
@@ -195,7 +250,7 @@ function parseLidar(header: Record<string, unknown>, payload: Uint8Array, frameB
     const scale = Number(header.scale ?? 0.001);
     const offset = (header.offset as number[]) ?? [0, 0, 0];
     const emit = (points: Float32Array, colors: Uint8Array | null = null) => {
-      cbLidar?.(points, count, {
+      cbLidar?.(points, count || Math.floor(points.length / 3), {
         header,
         colors,
         receivedAt: Date.now(),
@@ -238,24 +293,30 @@ function parseFrame(buffer: ArrayBuffer): void {
     header = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, 6, headerLen)));
   } catch { return; }
 
+  if (header.robot_id && String(header.robot_id) !== DOG_ROBOT_ID) return;
+
   const stream = String(header.stream ?? '');
   const payload = new Uint8Array(buffer, 6 + headerLen);
   cbNetBytes?.(stream, buffer.byteLength);
 
   if (stream === 'video') {
-    const fmt = String(header.image_format ?? '');
-    if (fmt === 'h264') {
+    if (String(header.image_format ?? '') === 'h264') {
       decodeH264(header, payload);
       return;
     }
-    const mime = fmt === 'png' ? 'image/png' : fmt === 'webp' ? 'image/webp' : 'image/jpeg';
-   
-    if (videoCanvases.size > 0 && typeof createImageBitmap === 'function') {
-      // Web: frames go straight to the canvas; skip the costly base64 encode.
-      drawImageBytesToCanvases(payload, mime);
-      return;
-    }
+    const mime = mimeFor(header.image_format);
+    // Web: frames go straight to the canvas; skip the costly base64 encode.
+    if (enqueueImage(videoQueue, payload, mime, () => cbVideoTick?.())) return;
     cbVideo?.(`data:${mime};base64,${uint8ToBase64(payload)}`);
+    return;
+  }
+
+  if (stream === 'thermal') {
+    // Metadata is reported together with its decoded frame.
+    const meta = header as ThermalFrameMeta;
+    if (!enqueueImage(thermalQueue, payload, mimeFor(header.image_format), () => cbThermal?.(meta))) {
+      cbThermal?.(meta);
+    }
     return;
   }
 
@@ -335,6 +396,15 @@ function buildWsUrl(): string {
 
 function doConnect(gen: number): void {
   if (gen !== currentGen) return;
+  // Claim control before opening the socket (as benyi2.html does), so the
+  // server treats this connection as the operator and accepts drive ops.
+  activateDogControl()
+    .catch(() => {})
+    .finally(() => openSocket(gen));
+}
+
+function openSocket(gen: number): void {
+  if (gen !== currentGen) return;
   try {
     const socket = new WebSocket(buildWsUrl());
     socket.binaryType = 'arraybuffer';
@@ -353,6 +423,7 @@ function doConnect(gen: number): void {
     };
 
     socket.onclose = () => {
+      invalidateImageQueues();
       cbStatus?.(false);
       if (gen === currentGen) {
         reconnectTimer = setTimeout(() => doConnect(gen), 3000);
@@ -381,6 +452,7 @@ export function connectRobotWS(opts: {
   onCommandAck?: CommandAckCallback;
   onAudio?: AudioCallback;
   onNetBytes?: NetBytesCallback;
+  onThermal?: ThermalCallback;
 }): () => void {
   const gen = ++currentGen;
   cbVideo = opts.onVideoFrame ?? null;
@@ -395,6 +467,7 @@ export function connectRobotWS(opts: {
   cbCommandAck = opts.onCommandAck ?? null;
   cbAudio = opts.onAudio ?? null;
   cbNetBytes = opts.onNetBytes ?? null;
+  cbThermal = opts.onThermal ?? null;
 
   doConnect(gen);
 
@@ -404,6 +477,7 @@ export function connectRobotWS(opts: {
     ws?.close();
     ws = null;
     resetVideoDecoder();
+    invalidateImageQueues();
     cbVideo = null;
     cbVideoTick = null;
     cbTelemetry = null;
@@ -416,6 +490,7 @@ export function connectRobotWS(opts: {
     cbCommandAck = null;
     cbAudio = null;
     cbNetBytes = null;
+    cbThermal = null;
   };
 }
 
@@ -425,13 +500,17 @@ export function sendRobotWsMessage(message: Record<string, unknown>): boolean {
   return true;
 }
 
+// The robot server orders drive messages by `sequence` and drops ones that
+// lack it; mirrors the reference console (benyi2.html).
+let driveSequence = 0;
+
 export function sendRobotDrive(linearX: number, lateralY: number, angularZ: number, durationMs = 320): boolean {
   return sendRobotWsMessage({
     op: 'drive',
     robot_id: DOG_ROBOT_ID,
+    sequence: ++driveSequence,
     payload: {
       linear_x: linearX,
-      linear_y: lateralY,
       lateral_y: lateralY,
       angular_z: angularZ,
       duration_ms: durationMs,
@@ -443,6 +522,7 @@ export function sendRobotDriveStop(): boolean {
   return sendRobotWsMessage({
     op: 'drive_stop',
     robot_id: DOG_ROBOT_ID,
+    sequence: ++driveSequence,
   });
 }
 

@@ -27,6 +27,30 @@ export const styles = StyleSheet.create({
   noSignalFeed: { backgroundColor: '#1c1818' },
   noSignalText: { color: '#4a3c3c', fontFamily: MONO, fontSize: d(11), letterSpacing: 1 },
 
+  thermalReadout: {
+    position: 'absolute',
+    left: d(8),
+    top: d(8),
+    alignItems: 'flex-start',
+    gap: d(4),
+  },
+  thermalReadoutText: {
+    color: '#F8E3E3',
+    fontFamily: MONO,
+    fontSize: d(9),
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: d(5),
+    paddingVertical: d(2),
+    borderRadius: 3,
+  },
+  thermalPersonBadge: {
+    backgroundColor: RED,
+    paddingHorizontal: d(6),
+    paddingVertical: d(2),
+    borderRadius: 3,
+  },
+  thermalPersonText: { color: '#fff', fontFamily: MONO, fontSize: d(9), fontWeight: '700', letterSpacing: 0.5 },
+
   feedGrid: {
     ...StyleSheet.absoluteFillObject,
     flexDirection: 'row',

@@ -5,7 +5,7 @@ export function getBackendHost() { return _backendHost; }
 const bUrl = () => `http://${_backendHost}:3000`;
 const dUrl = () => `http://${_backendHost}:3001`;
 
-export const DOG_API_URL = 'http://10.40.5.4:8000';
+export const DOG_API_URL = 'http://181.93.94.107:8000';
 export const DOG_TOKEN = 'dev-operator-token';
 export const DOG_ROBOT_ID = 'go2_01';
 
@@ -121,18 +121,18 @@ export async function moveRobot(
   speedFactor = 0.5
 ): Promise<void> {
   if (direction === 'stop') {
-    await sendDogCommand('move', { linear_x: 0, linear_y: 0, angular_z: 0, duration_ms: 100 }).catch(() => {});
+    await sendDogCommand('move', { linear_x: 0, angular_z: 0, duration_ms: 100 }).catch(() => {});
     return;
   }
   await activateDogControl();
   const spd = Math.max(0.1, Math.min(1, speedFactor));
   const payloadByDirection: Record<string, Record<string, unknown>> = {
-    forward:  { linear_x:  3.5 * spd, linear_y: 0, angular_z: 0,         duration_ms: 520 },
-    backward: { linear_x: -2.3 * spd, linear_y: 0, angular_z: 0,         duration_ms: 520 },
-    left:     { linear_x: 0,          linear_y: 0, angular_z:  3.68 * spd, duration_ms: 460 },
-    right:    { linear_x: 0,          linear_y: 0, angular_z: -3.68 * spd, duration_ms: 460 },
-    strafeL:  { linear_x: 0, linear_y:  0.92 * spd, lateral_y:  0.92 * spd, angular_z: 0, duration_ms: 460 },
-    strafeR:  { linear_x: 0, linear_y: -0.92 * spd, lateral_y: -0.92 * spd, angular_z: 0, duration_ms: 460 },
+    forward:  { linear_x:  3.5 * spd, angular_z: 0,         duration_ms: 520 },
+    backward: { linear_x: -2.3 * spd, angular_z: 0,         duration_ms: 520 },
+    left:     { linear_x: 0,          angular_z:  3.68 * spd, duration_ms: 460 },
+    right:    { linear_x: 0,          angular_z: -3.68 * spd, duration_ms: 460 },
+    strafeL:  { linear_x: 0, lateral_y:  0.92 * spd, duration_ms: 520 },
+    strafeR:  { linear_x: 0, lateral_y: -0.92 * spd, duration_ms: 520 },
   };
   await sendDogCommand('move', payloadByDirection[direction]);
 }
@@ -144,13 +144,12 @@ export async function moveRobotAxes(
   durationMs = 350
 ): Promise<void> {
   if (linearX === 0 && linearY === 0 && angularZ === 0) {
-    await sendDogCommand('move', { linear_x: 0, linear_y: 0, angular_z: 0, duration_ms: 100 }).catch(() => {});
+    await sendDogCommand('move', { linear_x: 0, angular_z: 0, duration_ms: 100 }).catch(() => {});
     return;
   }
   await activateDogControl();
   await sendDogCommand('move', {
     linear_x: linearX,
-    linear_y: linearY,
     lateral_y: linearY,
     angular_z: angularZ,
     duration_ms: durationMs,
