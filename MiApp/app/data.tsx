@@ -1,833 +1,497 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, ScrollView, Pressable,
-  StyleSheet, ActivityIndicator, Platform, Alert, Linking,
+  ActivityIndicator,
+  Image,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import {
-  formatMissionTime,
-  listServerMissions,
-  loadMissionMap,
-  MISSION_FILE_LABELS,
-  MISSION_STATUS_LABELS,
-  missionFileUrl,
-  missionIsReady,
-  MissionPlayback,
-  openMissionPlayback,
-  requestMissionDownload,
-  ServerMission,
-} from '../services/missions';
-import LidarReconstruction, { LidarSink } from '../components/LidarReconstruction';
+  actualizarDatosMision,
+  contenidoDeMision,
+  eliminarMision,
+  getMisiones,
+  MisionEvento,
+  MisionGaleriaItem,
+  MisionResumen,
+} from '../services/api';
+import { deleteMissionVideo, getMissionVideoUrl } from '../services/misionMedia';
+import Icon from '../components/Icons';
+import { C, formatClock, HELV, VIGA } from '../styles/theme';
 import { d } from '../utils/scale';
 
-const RED = '#E83D3D';
-const BG = '#292222';
-const PANEL = '#453A3A';
-const MONO = Platform.OS === 'web' ? '"JetBrains Mono", monospace' : 'monospace';
+// "Misiones" (PDF pages 3 and 4): list, edit/select mode, and an expandable
+// panel per mission with its action timeline and photo/video carousel.
 
-// Sync rules from the missions guide: 0.4 s drift tolerance, 0.5x/1x/2x speeds.
-const DRIFT_TOLERANCE_S = 0.4;
-const SPEEDS = [0.5, 1, 2] as const;
-const RENEW_MARGIN_S = 60;
-
-type VideoKey = 'camera' | 'thermal';
-type TileKey = 'camera' | 'lidar' | 'thermal' | 'ir';
-
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-function formatFecha(unixSeconds: number) {
-  return new Date(unixSeconds * 1000).toLocaleString('es-AR', {
-    day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
-  });
+function formatFecha(iso: string) {
+  return new Date(iso).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
-const MoreDots = () => (
-  <View style={styles.dots}>
-    <View style={styles.dot} />
-    <View style={styles.dot} />
-    <View style={styles.dot} />
-  </View>
-);
-
-const TopButton = ({ label, onPress }: { label: string; onPress: () => void }) => (
-  <TouchableOpacity style={styles.topButton} onPress={onPress} activeOpacity={0.8}>
-    <Text style={styles.topButtonText}>{label}</Text>
-  </TouchableOpacity>
-);
-
-function StatusTag({ mission }: { mission: ServerMission }) {
-  if (mission.status === 'completed') return null;
-  const warn = mission.status === 'error' || mission.status === 'interrupted';
-  return <Text style={[styles.statusTag, warn && styles.statusTagWarn]}>{MISSION_STATUS_LABELS[mission.status]}</Text>;
+function missionMeta(m: MisionResumen) {
+  const { ubicacion } = contenidoDeMision(m.descripcion);
+  return ubicacion ? `${formatFecha(m.created_at)} | ${ubicacion}` : formatFecha(m.created_at);
 }
 
-// ── Downloads ────────────────────────────────────────────────────────────────
+// ── Expanded panel ──────────────────────────────────────────────────────────
 
-function DownloadsPanel({ mission, onClose }: { mission: ServerMission; onClose: () => void }) {
-  const [busy, setBusy] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  // Ticket links the browser refused to open as a popup (e.g. after a slow ZIP).
-  const [pendingLinks, setPendingLinks] = useState<Record<string, string>>({});
-  const ready = missionIsReady(mission);
-
-  // New tab: the file lives on another origin, so an in-page link would
-  // navigate away from the app instead of downloading.
-  const openLink = (filename: string, url: string) => {
-    if (Platform.OS !== 'web') { Linking.openURL(url).catch(() => {}); return true; }
-    // Not the 'noopener' feature: with it window.open always returns null and
-    // a blocked popup would be indistinguishable. Detach the opener instead.
-    const opened = window.open(url, '_blank');
-    if (!opened) return false;
-    opened.opener = null;
-    setPendingLinks(({ [filename]: _, ...rest }) => rest);
-    return true;
-  };
-
-  const download = async (filename: string) => {
-    setBusy(filename);
-    setMessage(filename === 'mission.zip' ? 'Preparando ZIP… puede tardar.' : null);
-    try {
-      const url = await requestMissionDownload(mission.mission_id, filename);
-      if (!openLink(filename, url)) {
-        setPendingLinks((prev) => ({ ...prev, [filename]: url }));
-        setMessage('El navegador bloqueó la ventana: tocá ABRIR para descargar (enlace válido 10 min).');
-        return;
-      }
-      setMessage(null);
-    } catch (e) {
-      setMessage(`No se pudo descargar ${filename}: ${errorText(e)}`);
-    } finally {
-      setBusy(null);
-    }
-  };
-
+function Timeline({ eventos }: { eventos: MisionEvento[] }) {
+  if (!eventos.length) return <Text style={styles.emptySmall}>Sin acciones registradas</Text>;
   return (
-    <Pressable style={styles.overlay} onPress={onClose}>
-      <Pressable style={styles.downloadsPanel}>
-        <View style={styles.downloadsHeader}>
-          <Text style={styles.panelTitle}>DESCARGAS</Text>
-          <TouchableOpacity onPress={onClose} hitSlop={10}><Text style={styles.panelClose}>✕</Text></TouchableOpacity>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingVertical: d(4) }}>
+      {eventos.map((e, i) => (
+        <View key={i} style={styles.eventRow}>
+          <View style={styles.eventRail}>
+            <View style={[styles.eventDot, (e.tipo === 'foto' || e.tipo === 'video') && styles.eventDotMedia]} />
+            {i < eventos.length - 1 && <View style={styles.eventLine} />}
+          </View>
+          <View style={styles.eventBody}>
+            <Text style={styles.eventTime}>{formatClock(e.t)}</Text>
+            <Text style={styles.eventText}>{e.texto}</Text>
+          </View>
         </View>
-        {!ready && <Text style={styles.panelHint}>La misión todavía se está guardando; las descargas se habilitan al terminar.</Text>}
-        {(mission.status === 'error' || mission.status === 'interrupted') && (
-          <Text style={styles.panelWarn}>Grabación parcial{mission.error ? `: ${mission.error}` : ''}. Se ofrecen los archivos disponibles.</Text>
-        )}
-        <ScrollView style={{ maxHeight: d(210) }}>
-          {[...mission.artifacts, 'mission.zip'].map((filename) => (
-            <View key={filename} style={styles.fileRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.fileName}>{filename}</Text>
-                <Text style={styles.fileLabel}>{MISSION_FILE_LABELS[filename] ?? ''}</Text>
-              </View>
-              {pendingLinks[filename] ? (
-                <TouchableOpacity onPress={() => openLink(filename, pendingLinks[filename])} style={[styles.fileButton, styles.fileButtonReady]}>
-                  <Text style={[styles.fileButtonText, { color: '#fff' }]}>ABRIR</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  disabled={!ready || busy !== null}
-                  onPress={() => download(filename)}
-                  style={[styles.fileButton, (!ready || busy !== null) && { opacity: 0.4 }]}
-                >
-                  {busy === filename
-                    ? <ActivityIndicator color={RED} size="small" />
-                    : <Text style={styles.fileButtonText}>DESCARGAR</Text>}
-                </TouchableOpacity>
-              )}
-            </View>
-          ))}
-        </ScrollView>
-        {message && <Text style={styles.panelHint}>{message}</Text>}
-      </Pressable>
-    </Pressable>
+      ))}
+    </ScrollView>
   );
 }
 
-// ── Player: 4 views on one mission timeline ────────────────────────────────
-
-function MissionPlayer({ mission, onBack }: { mission: ServerMission; onBack: () => void }) {
-  const [playback, setPlayback] = useState<MissionPlayback | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [displayTime, setDisplayTime] = useState(0);
-  const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState<number>(1);
-  const [videoStatus, setVideoStatus] = useState<Record<VideoKey, string>>({ camera: '', thermal: '' });
-  const [mapStatus, setMapStatus] = useState('cargando mapa…');
-  const [expanded, setExpanded] = useState<TileKey | null>(null);
-  const [downloadsOpen, setDownloadsOpen] = useState(false);
-  const [trackWidth, setTrackWidth] = useState(1);
-
-  const duration = Math.max(0, playback?.mission.duration_s ?? mission.duration_s);
-  const clock = useRef({ time: 0, playing: false, speed: 1 });
-  const videoRefs = useRef<Record<VideoKey, HTMLVideoElement | null>>({ camera: null, thermal: null });
-  const playbackRef = useRef<MissionPlayback | null>(null);
-  const expiresAtRef = useRef(0);
-  const generationRef = useRef(0);
-  const lidarSinkRef = useRef<LidarSink | null>(null);
-  const lastTapRef = useRef<{ key: TileKey | null; at: number }>({ key: null, at: 0 });
-
-  clock.current.playing = playing;
-  clock.current.speed = speed;
-
-  // Ask for (or renew) the 10-minute playback tickets. The mission clock is
-  // independent of the <video> elements, so time and pause state survive a renew.
-  const loadPlayback = useCallback(async () => {
-    const generation = ++generationRef.current;
-    try {
-      const result = await openMissionPlayback(mission.mission_id);
-      if (generation !== generationRef.current) return; // stale response
-      playbackRef.current = result;
-      expiresAtRef.current = Date.now() + result.expires_in_s * 1000;
-      setPlayback(result);
-      setLoadError(null);
-    } catch (e) {
-      if (generation === generationRef.current) setLoadError(errorText(e));
-    }
-  }, [mission.mission_id]);
+function MediaCarousel({ items }: { items: MisionGaleriaItem[] }) {
+  const [index, setIndex] = useState(0);
+  const [videoUrls, setVideoUrls] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    loadPlayback();
-    const renewTimer = setInterval(() => {
-      if (expiresAtRef.current && Date.now() > expiresAtRef.current - RENEW_MARGIN_S * 1000) loadPlayback();
-    }, 15000);
-    // A suspended tab may come back with expired tickets.
-    const onVisible = () => {
-      if (document.visibilityState === 'visible' && Date.now() > expiresAtRef.current - RENEW_MARGIN_S * 1000) loadPlayback();
-    };
-    if (Platform.OS === 'web') document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      generationRef.current++;
-      clearInterval(renewTimer);
-      if (Platform.OS === 'web') document.removeEventListener('visibilitychange', onVisible);
-      for (const video of Object.values(videoRefs.current)) {
-        if (!video) continue;
-        video.pause();
-        video.removeAttribute('src');
-        video.load();
-      }
-    };
-  }, [loadPlayback]);
-
-  // Accumulated LiDAR map (not a time series: it doesn't follow the timeline).
-  const mapPath = playback?.map_path ?? null;
-  const hasPlayback = !!playback;
-  useEffect(() => {
-    if (!hasPlayback) return;
-    if (!mapPath) { setMapStatus('sin mapa'); return; }
     let alive = true;
-    setMapStatus('cargando mapa…');
-    loadMissionMap(mapPath)
-      .then((points) => {
-        if (!alive) return;
-        lidarSinkRef.current?.clear();
-        lidarSinkRef.current?.addFrame({ points, colors: null, mode: 'keyframe' });
-        setMapStatus(`mapa acumulado · ${Math.floor(points.length / 3).toLocaleString()} pts`);
-      })
-      .catch((e) => { if (alive) setMapStatus(`error: ${errorText(e)}`); });
-    return () => { alive = false; };
-  }, [mapPath, hasPlayback]);
-
-  // Put every video where the mission clock says it should be.
-  const syncVideos = useCallback((seekExactly = false) => {
-    const current = playbackRef.current;
-    if (!current) return;
-    const t = clock.current.time;
-    const nextStatus: Record<VideoKey, string> = { camera: '', thermal: '' };
-    for (const key of ['camera', 'thermal'] as VideoKey[]) {
-      const track = current.videos[key];
-      const video = videoRefs.current[key];
-      if (!track) { nextStatus[key] = 'sin video'; continue; }
-      if (!video || !(video.readyState >= 1)) { nextStatus[key] = 'cargando'; continue; }
-      const local = t - track.offset_s;
-      if (local < 0) {
-        if (!video.paused) video.pause();
-        if (video.currentTime !== 0) video.currentTime = 0;
-        nextStatus[key] = 'todavía no había comenzado';
-      } else if (t > track.last_at_s) {
-        if (!video.paused) video.pause();
-        nextStatus[key] = 'fin de grabación';
-      } else {
-        const target = Math.min(local, Math.max(0, video.duration - 0.001));
-        if (seekExactly || Math.abs(video.currentTime - target) > DRIFT_TOLERANCE_S) video.currentTime = target;
-        video.playbackRate = clock.current.speed;
-        if (clock.current.playing && video.paused) video.play().catch(() => {});
-        if (!clock.current.playing && !video.paused) video.pause();
-        nextStatus[key] = video.seeking || video.readyState < 3 ? 'cargando' : '';
-      }
-    }
-    setVideoStatus((prev) => (prev.camera === nextStatus.camera && prev.thermal === nextStatus.thermal ? prev : nextStatus));
-  }, []);
-
-  // Common clock: advances with the selected speed and waits for any video
-  // that is needed right now but still seeking/buffering.
-  useEffect(() => {
-    let raf = 0;
-    let last = performance.now();
-    let lastUi = 0;
-    const tick = (now: number) => {
-      const dt = (now - last) / 1000;
-      last = now;
-      const current = playbackRef.current;
-      if (clock.current.playing && current) {
-        const t = clock.current.time;
-        const waiting = (['camera', 'thermal'] as VideoKey[]).some((key) => {
-          const track = current.videos[key];
-          const video = videoRefs.current[key];
-          if (!track || !video) return false;
-          const active = t >= track.offset_s && t <= track.last_at_s;
-          return active && (video.seeking || video.readyState < 3);
-        });
-        if (!waiting) clock.current.time = Math.min(duration, t + dt * clock.current.speed);
-        if (clock.current.time >= duration) {
-          clock.current.time = duration;
-          setPlaying(false);
-        }
-      }
-      syncVideos();
-      if (now - lastUi > 200) {
-        lastUi = now;
-        setDisplayTime(clock.current.time);
-      }
-      raf = requestAnimationFrame(tick);
+    const urls: string[] = [];
+    Promise.all(items.filter((it) => it.tipo === 'video' && it.videoId).map(async (it) => {
+      const url = await getMissionVideoUrl(it.videoId!);
+      if (url) urls.push(url);
+      return [it.id, url] as const;
+    })).then((entries) => {
+      if (alive) setVideoUrls(Object.fromEntries(entries.filter(([, url]) => !!url)) as Record<string, string>);
+    }).catch(() => {});
+    return () => {
+      alive = false;
+      urls.forEach((url) => URL.revokeObjectURL(url));
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [duration, syncVideos]);
+  }, [items]);
 
-  const seekTo = (t: number) => {
-    clock.current.time = Math.min(Math.max(0, t), duration);
-    setDisplayTime(clock.current.time);
-    syncVideos(true);
-  };
+  if (!items.length) return <View style={styles.carouselEmpty}><Text style={styles.emptySmall}>Sin fotos ni videos</Text></View>;
 
-  const togglePlay = () => {
-    if (!playing && clock.current.time >= duration) seekTo(0);
-    setPlaying((p) => !p);
-  };
-
-  const onTrack = (x: number) => seekTo((x / trackWidth) * duration);
-
-  const handleTileTap = (key: TileKey) => {
-    const now = Date.now();
-    const last = lastTapRef.current;
-    if (last.key === key && now - last.at < 350) {
-      setExpanded((current) => (current === key ? null : key));
-      lastTapRef.current = { key: null, at: 0 };
-    } else {
-      lastTapRef.current = { key, at: now };
-    }
-  };
-
-  const m = playback?.mission ?? mission;
-  const partial = m.status === 'error' || m.status === 'interrupted';
-
-  const videoTile = (key: VideoKey) => {
-    const track = playback?.videos[key];
-    if (Platform.OS !== 'web') {
-      return <View style={styles.tileEmpty}><Text style={styles.tileEmptyText}>REPRODUCCIÓN DISPONIBLE EN LA WEB</Text></View>;
-    }
-    if (!track) {
-      return <View style={styles.tileEmpty}><Text style={styles.tileEmptyText}>{playback ? 'SIN VIDEO' : ''}</Text></View>;
-    }
-    return React.createElement('video', {
-      ref: (el: HTMLVideoElement | null) => { videoRefs.current[key] = el; },
-      src: missionFileUrl(track.path),
-      preload: 'metadata',
-      playsInline: true,
-      muted: true,
-      onLoadedMetadata: () => syncVideos(true),
-      style: { width: '100%', height: '100%', objectFit: 'contain', display: 'block', background: '#000' },
-    });
-  };
-
-  const tiles: { key: TileKey; label: string; status: string; content: React.ReactNode }[] = [
-    { key: 'camera', label: 'CÁMARA', status: videoStatus.camera, content: videoTile('camera') },
-    {
-      key: 'lidar',
-      label: 'LIDAR',
-      status: loadError && !playback ? 'no disponible' : mapStatus,
-      content: Platform.OS === 'web'
-        ? <LidarReconstruction sinkRef={lidarSinkRef} voxelSize={m.voxel_size_m ?? 0.08} />
-        : <View style={styles.tileEmpty}><Text style={styles.tileEmptyText}>MAPA DISPONIBLE EN LA WEB</Text></View>,
-    },
-    { key: 'thermal', label: 'TÉRMICA', status: videoStatus.thermal, content: videoTile('thermal') },
-    {
-      key: 'ir',
-      label: 'INFRARROJA',
-      status: 'no se graba',
-      content: <View style={styles.tileEmpty}><Text style={styles.tileEmptyText}>SIN DATOS</Text></View>,
-    },
-  ];
-
-  // Coverage of each stream on the mission timeline (from the manifest).
-  const coverage = (['camera', 'thermal', 'lidar'] as const).map((key) => {
-    const s = m.streams?.[key];
-    if (!s || s.first_at_s == null || s.last_at_s == null || !duration) return null;
-    return { key, left: s.first_at_s / duration, width: Math.max(0, s.last_at_s - s.first_at_s) / duration };
-  });
-
-  const progress = duration ? displayTime / duration : 0;
+  const item = items[Math.min(index, items.length - 1)];
+  const go = (delta: number) => setIndex((i) => (i + delta + items.length) % items.length);
 
   return (
-    <View style={styles.window}>
-      <View style={styles.grid}>
-        {tiles.map((tile, index) => {
-          const isExpanded = expanded === tile.key;
-          const hidden = expanded !== null && !isExpanded;
-          return (
-            <Pressable
-              key={tile.key}
-              onPress={() => handleTileTap(tile.key)}
-              style={[
-                styles.tile,
-                index % 2 === 0 && styles.tileLeftCol,
-                index < 2 && styles.tileTopRow,
-                isExpanded && styles.tileExpanded,
-                hidden && styles.tileHidden,
-              ]}
-            >
-              {tile.content}
-              <View pointerEvents="none" style={[styles.tileLabel, isExpanded ? styles.tileLabelExpanded : LABEL_CORNERS[index]]}>
-                <Text style={styles.tileLabelText}>{tile.label}</Text>
-                {!!tile.status && <Text style={styles.tileLabelStatus}>{tile.status}</Text>}
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      <View style={styles.playerTopBar} pointerEvents="box-none">
-        <View style={styles.playerTopLeft}>
-          <TopButton label="BACK" onPress={onBack} />
-          {expanded && <TopButton label="4 VISTAS" onPress={() => setExpanded(null)} />}
-        </View>
-        <Text style={styles.playerTitle} numberOfLines={1}>{m.name.toUpperCase()}</Text>
-        <TouchableOpacity style={styles.downloadsButton} onPress={() => setDownloadsOpen(true)} activeOpacity={0.8}>
-          <Text style={styles.downloadsButtonText}>DESCARGAS</Text>
-        </TouchableOpacity>
-      </View>
-
-      {(partial || loadError) && (
-        <View style={styles.banner} pointerEvents="none">
-          <Text style={styles.bannerText}>
-            {loadError ? `No se pudo abrir la misión: ${loadError}` : `Grabación parcial${m.error ? `: ${m.error}` : ''}`}
-          </Text>
-        </View>
-      )}
-
-      <View style={styles.timelineBar}>
-        <TouchableOpacity onPress={togglePlay} style={styles.playButton} disabled={!playback}>
-          <Text style={styles.playButtonText}>{playing ? '❚❚' : '▶'}</Text>
-        </TouchableOpacity>
-        <Text style={styles.timeText}>{formatMissionTime(displayTime)} / {formatMissionTime(duration)}</Text>
-        <View
-          style={styles.trackArea}
-          onLayout={(e) => setTrackWidth(Math.max(1, e.nativeEvent.layout.width))}
-          onStartShouldSetResponder={() => true}
-          onMoveShouldSetResponder={() => true}
-          onResponderGrant={(e) => onTrack(e.nativeEvent.locationX)}
-          onResponderMove={(e) => onTrack(e.nativeEvent.locationX)}
-        >
-          <View style={styles.coverageRows} pointerEvents="none">
-            {coverage.map((c, i) => (
-              <View key={i} style={styles.coverageRow}>
-                {c && <View style={[styles.coverageFill, COVERAGE_COLORS[c.key], { left: `${c.left * 100}%`, width: `${c.width * 100}%` }]} />}
-              </View>
-            ))}
-          </View>
-          <View style={styles.track} pointerEvents="none">
-            <View style={[styles.trackFill, { width: `${progress * 100}%` }]} />
-          </View>
-          <View style={[styles.trackThumb, { left: `${progress * 100}%` }]} pointerEvents="none" />
-        </View>
-        <View style={styles.speedGroup}>
-          {SPEEDS.map((v) => (
-            <TouchableOpacity key={v} onPress={() => setSpeed(v)} style={[styles.speedChip, speed === v && styles.speedChipActive]}>
-              <Text style={[styles.speedText, speed === v && styles.speedTextActive]}>{v === 0.5 ? '0,5×' : `${v}×`}</Text>
+    <View style={styles.carousel}>
+      <View style={styles.carouselFrame}>
+        {item.tipo === 'captura' && item.uri ? (
+          <Image source={{ uri: item.uri }} style={styles.carouselMedia} resizeMode="contain" />
+        ) : videoUrls[item.id] && Platform.OS === 'web' ? (
+          React.createElement('video', {
+            key: item.id,
+            src: videoUrls[item.id],
+            controls: true,
+            style: { width: '100%', height: '100%', objectFit: 'contain', background: '#000' },
+          })
+        ) : (
+          <Text style={styles.emptySmall}>{item.tipo === 'video' ? 'Video no disponible en este dispositivo' : 'Imagen no disponible'}</Text>
+        )}
+        {items.length > 1 && (
+          <>
+            <TouchableOpacity style={[styles.carouselArrow, { left: d(8) }]} onPress={() => go(-1)}>
+              <Icon name="chevronLeft" size={d(18)} strokeWidth={2.8} />
             </TouchableOpacity>
+            <TouchableOpacity style={[styles.carouselArrow, { right: d(8) }]} onPress={() => go(1)}>
+              <Icon name="chevronRight" size={d(18)} strokeWidth={2.8} />
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+      <View style={styles.carouselFooter}>
+        <Text style={styles.carouselCaption}>
+          {item.tipo === 'captura' ? 'Foto' : `Video${item.duracionMs ? ` · ${formatClock(item.duracionMs / 1000).slice(3)}` : ''}`}
+        </Text>
+        <View style={styles.carouselDots}>
+          {items.map((it, i) => (
+            <Pressable key={it.id} hitSlop={4} onPress={() => setIndex(i)}>
+              <View style={[styles.carouselDot, i === index && styles.carouselDotActive]} />
+            </Pressable>
           ))}
         </View>
-      </View>
-
-      {downloadsOpen && <DownloadsPanel mission={m} onClose={() => setDownloadsOpen(false)} />}
-    </View>
-  );
-}
-
-// Label corner per grid tile (TL, TR, BL, BR): the corner nearest the center.
-const LABEL_CORNERS = [
-  { right: 8, bottom: 8, alignItems: 'flex-end' as const },
-  { left: 8, bottom: 8 },
-  { right: 8, top: 8, alignItems: 'flex-end' as const },
-  { left: 8, top: 8 },
-];
-
-const COVERAGE_COLORS = {
-  camera: { backgroundColor: '#E83D3D' },
-  thermal: { backgroundColor: '#ffb347' },
-  lidar: { backgroundColor: '#45d483' },
-};
-
-// ── Library ──────────────────────────────────────────────────────────────────
-
-function MissionRow({ mission, onOpen, onMore }: { mission: ServerMission; onOpen: () => void; onMore: () => void }) {
-  return (
-    <Pressable style={styles.row} onPress={onOpen}>
-      <View style={styles.rowTitle}>
-        <Text style={styles.rowText} numberOfLines={1}>{mission.name.toUpperCase()}</Text>
-        <StatusTag mission={mission} />
-      </View>
-      <TouchableOpacity onPress={onMore} hitSlop={10} style={styles.moreButton}>
-        <MoreDots />
-      </TouchableOpacity>
-    </Pressable>
-  );
-}
-
-function MissionPreviewCard({ mission, onClose, onOpen, onDownloads }: {
-  mission: ServerMission;
-  onClose: () => void;
-  onOpen: () => void;
-  onDownloads: () => void;
-}) {
-  const ready = missionIsReady(mission);
-  const frames = (key: 'camera' | 'thermal' | 'lidar') => mission.streams?.[key]?.frames ?? 0;
-  return (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.rowText} numberOfLines={1}>{mission.name.toUpperCase()}</Text>
-        <TouchableOpacity onPress={onClose} hitSlop={10} style={styles.cardMore}>
-          <MoreDots />
-        </TouchableOpacity>
-      </View>
-      <View style={styles.cardBody}>
-        <Text style={styles.cardMeta}>{formatFecha(mission.started_at)} · {formatMissionTime(mission.duration_s)}</Text>
-        <Text style={styles.cardMeta}>{MISSION_STATUS_LABELS[mission.status]}{mission.error ? ` · ${mission.error}` : ''}</Text>
-        <Text style={styles.cardMeta}>cámara {frames('camera')} · térmica {frames('thermal')} · lidar {frames('lidar')} cuadros</Text>
-        {!!mission.lidar_points && <Text style={styles.cardMeta}>mapa {mission.lidar_points.toLocaleString()} pts</Text>}
-        {!!mission.missing_streams?.length && <Text style={styles.cardWarn}>sin: {mission.missing_streams.join(', ')}</Text>}
-      </View>
-      <View style={styles.cardActions}>
-        <TouchableOpacity onPress={onOpen} disabled={!ready} style={!ready && { opacity: 0.4 }}>
-          <Text style={styles.cardAction}>ABRIR</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={onDownloads}><Text style={styles.cardAction}>DESCARGAS</Text></TouchableOpacity>
+        <Text style={styles.carouselCaption}>{index + 1}/{items.length}</Text>
       </View>
     </View>
   );
 }
+
+function MissionDetail({ mission }: { mission: MisionResumen }) {
+  const c = contenidoDeMision(mission.descripcion);
+  const info = [
+    c.operador ? `Operador: ${c.operador}` : null,
+    c.ubicacion ? `Ubicación: ${c.ubicacion}` : null,
+    c.duracion_s != null ? `Duración: ${formatClock(c.duracion_s)}` : null,
+  ].filter(Boolean).join('   ·   ');
+  return (
+    <View style={styles.detail}>
+      {!!info && <Text style={styles.detailInfo}>{info}</Text>}
+      <View style={styles.detailColumns}>
+        <View style={styles.timelineColumn}>
+          <Text style={styles.detailHeading}>Línea de tiempo</Text>
+          <Timeline eventos={c.eventos ?? []} />
+        </View>
+        <View style={styles.mediaColumn}>
+          <MediaCarousel items={c.galeria} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ── Screen ──────────────────────────────────────────────────────────────────
 
 export default function DataScreen() {
   const router = useRouter();
-  const [missions, setMissions] = useState<ServerMission[]>([]);
+  const [missions, setMissions] = useState<MisionResumen[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [previewId, setPreviewId] = useState<string | null>(null);
-  const [playerId, setPlayerId] = useState<string | null>(null);
-  const [downloadsId, setDownloadsId] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<{ id: number; nombre: string; operador: string; ubicacion: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
 
-  const load = useCallback(async (quiet = false) => {
-    if (!quiet) setLoading(true);
-    try {
-      setMissions(await listServerMissions());
-      setError(null);
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      if (!quiet) setLoading(false);
-    }
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { const list = await getMisiones(); if (mounted.current) setMissions(list); }
+    catch { if (mounted.current) setMissions([]); }
+    finally { if (mounted.current) setLoading(false); }
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  // While a mission is still recording/finalizing, refresh every 3 s.
-  const anyActive = missions.some((m) => !missionIsReady(m));
-  useEffect(() => {
-    if (!anyActive || playerId) return;
-    const interval = setInterval(() => load(true), 3000);
-    return () => clearInterval(interval);
-  }, [anyActive, load, playerId]);
-
-  const openPlayer = (mission: ServerMission) => {
-    if (!missionIsReady(mission)) {
-      Alert.alert('Misión', 'La misión todavía se está grabando o guardando. Se podrá reproducir cuando termine.');
-      return;
-    }
-    setPreviewId(null);
-    setPlayerId(mission.mission_id);
+  const toggleEditing = () => {
+    setEditing((v) => !v);
+    setSelected(new Set());
+    setExpandedId(null);
   };
 
-  const player = missions.find((m) => m.mission_id === playerId);
-  if (player) return <MissionPlayer mission={player} onBack={() => { setPlayerId(null); load(true); }} />;
+  const toggleSelected = (id: number) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
-  const preview = missions.find((m) => m.mission_id === previewId);
-  const downloads = missions.find((m) => m.mission_id === downloadsId);
+  const openEditForm = () => {
+    if (selected.size !== 1) return;
+    const m = missions.find((x) => selected.has(x.id_mision));
+    if (!m) return;
+    const c = contenidoDeMision(m.descripcion);
+    setEditForm({ id: m.id_mision, nombre: m.nombre, operador: c.operador ?? '', ubicacion: c.ubicacion ?? '' });
+  };
+
+  const saveEditForm = async () => {
+    if (!editForm) return;
+    setBusy(true);
+    await actualizarDatosMision(editForm.id, {
+      nombre: editForm.nombre.trim() || 'Misión',
+      operador: editForm.operador.trim(),
+      ubicacion: editForm.ubicacion.trim(),
+    });
+    setBusy(false);
+    setEditForm(null);
+    await load();
+  };
+
+  const deleteSelected = async () => {
+    setBusy(true);
+    for (const id of selected) {
+      const m = missions.find((x) => x.id_mision === id);
+      // Videos live in this browser's IndexedDB: free them too.
+      for (const item of contenidoDeMision(m?.descripcion ?? null).galeria) {
+        if (item.videoId) await deleteMissionVideo(item.videoId).catch(() => {});
+      }
+      await eliminarMision(id);
+    }
+    setBusy(false);
+    setConfirmDelete(false);
+    setSelected(new Set());
+    setEditing(false);
+    await load();
+  };
 
   return (
     <View style={styles.window}>
-      <View style={styles.topBar}>
-        <TopButton label="HOME" onPress={() => router.replace('/')} />
+      <View style={styles.header}>
+        <TouchableOpacity activeOpacity={0.85} style={styles.backButton} onPress={() => router.replace('/')}>
+          <Icon name="arrowLeft" size={d(24)} strokeWidth={2.6} />
+        </TouchableOpacity>
+        <Text style={styles.title}>Misiones</Text>
+        <Text style={styles.count}>{missions.length} registrada{missions.length === 1 ? '' : 's'}</Text>
+        <View style={{ flex: 1 }} />
+        <TouchableOpacity
+          activeOpacity={0.85}
+          style={[styles.headerButton, editing ? styles.headerButtonCancel : styles.headerButtonEdit]}
+          onPress={toggleEditing}
+        >
+          <Text style={styles.headerButtonText}>{editing ? 'Cancelar' : 'Editar'}</Text>
+        </TouchableOpacity>
       </View>
 
       {loading ? (
-        <ActivityIndicator color={RED} style={{ marginTop: d(112) }} />
-      ) : error && !missions.length ? (
-        <View style={{ marginTop: d(112), alignItems: 'center', gap: d(10) }}>
-          <Text style={styles.emptyText}>No se pudo conectar con el servidor: {error}</Text>
-          <TopButton label="REINTENTAR" onPress={() => load()} />
-        </View>
-      ) : preview ? (
-        <Pressable style={StyleSheet.absoluteFill} onPress={() => setPreviewId(null)}>
-          <Pressable style={styles.cardPosition}>
-            <MissionPreviewCard
-              mission={preview}
-              onClose={() => setPreviewId(null)}
-              onOpen={() => openPlayer(preview)}
-              onDownloads={() => { setPreviewId(null); setDownloadsId(preview.mission_id); }}
-            />
-          </Pressable>
-        </Pressable>
+        <ActivityIndicator color={C.red} style={{ marginTop: d(60) }} />
       ) : missions.length === 0 ? (
-        <Text style={[styles.emptyText, { marginTop: d(112) }]}>No hay misiones grabadas en el servidor</Text>
+        <Text style={styles.empty}>Todavía no hay misiones registradas</Text>
       ) : (
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-          {missions.map((m) => (
-            <MissionRow
-              key={m.mission_id}
-              mission={m}
-              onOpen={() => openPlayer(m)}
-              onMore={() => setPreviewId(m.mission_id)}
-            />
-          ))}
+        <ScrollView style={styles.list} contentContainerStyle={[styles.listContent, editing && { paddingBottom: d(90) }]}>
+          {missions.map((m) => {
+            const isSelected = selected.has(m.id_mision);
+            const isExpanded = expandedId === m.id_mision;
+            return (
+              <View key={m.id_mision}>
+                <View style={styles.rowLine}>
+                  {editing && (
+                    <Pressable hitSlop={8} onPress={() => toggleSelected(m.id_mision)} style={[styles.checkbox, isSelected && styles.checkboxOn]}>
+                      {isSelected && <Icon name="check" size={d(13)} color="#fff" strokeWidth={3.4} />}
+                    </Pressable>
+                  )}
+                  <Pressable
+                    style={[
+                      styles.row,
+                      editing && styles.rowEditing,
+                      isSelected && styles.rowSelected,
+                      isExpanded && styles.rowExpanded,
+                    ]}
+                    onPress={() => (editing ? toggleSelected(m.id_mision) : setExpandedId(isExpanded ? null : m.id_mision))}
+                  >
+                    <Text style={[styles.rowName, editing && !isSelected && { color: C.red }]} numberOfLines={1}>{m.nombre}</Text>
+                    <Text style={[styles.rowMeta, isSelected && { color: C.text }]} numberOfLines={1}>{missionMeta(m)}</Text>
+                    <View style={{ flex: 1 }} />
+                    {!editing && <Icon name={isExpanded ? 'chevronUp' : 'chevronDown'} size={d(16)} color={C.textDim} strokeWidth={2.6} />}
+                  </Pressable>
+                </View>
+                {isExpanded && !editing && <MissionDetail mission={m} />}
+              </View>
+            );
+          })}
         </ScrollView>
       )}
 
-      {downloads && <DownloadsPanel mission={downloads} onClose={() => setDownloadsId(null)} />}
+      {editing && (
+        <View style={styles.editBar}>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            disabled={selected.size !== 1}
+            style={[styles.editBarButton, styles.editDataButton, selected.size !== 1 && styles.disabled]}
+            onPress={openEditForm}
+          >
+            <Text style={styles.editBarText}>Editar datos</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            disabled={selected.size === 0}
+            style={[styles.editBarButton, styles.deleteButton, selected.size === 0 && styles.disabled]}
+            onPress={() => setConfirmDelete(true)}
+          >
+            <Text style={styles.editBarText}>Borrar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <Modal transparent animationType="fade" visible={!!editForm} onRequestClose={() => setEditForm(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Editar datos</Text>
+            {editForm && (
+              <>
+                <Text style={styles.label}>NOMBRE</Text>
+                <TextInput style={styles.input} value={editForm.nombre} onChangeText={(v) => setEditForm({ ...editForm, nombre: v })} />
+                <Text style={styles.label}>OPERADOR</Text>
+                <TextInput style={styles.input} value={editForm.operador} onChangeText={(v) => setEditForm({ ...editForm, operador: v })} />
+                <Text style={styles.label}>UBICACIÓN</Text>
+                <TextInput style={styles.input} value={editForm.ubicacion} onChangeText={(v) => setEditForm({ ...editForm, ubicacion: v })} />
+              </>
+            )}
+            <View style={styles.modalActions}>
+              <TouchableOpacity activeOpacity={0.85} style={styles.modalSecondary} onPress={() => setEditForm(null)}>
+                <Text style={styles.modalButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity activeOpacity={0.85} style={styles.modalPrimary} disabled={busy} onPress={saveEditForm}>
+                <Text style={styles.modalButtonText}>{busy ? 'Guardando…' : 'Guardar'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal transparent animationType="fade" visible={confirmDelete} onRequestClose={() => setConfirmDelete(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>¿Borrar {selected.size === 1 ? 'la misión' : `${selected.size} misiones`}?</Text>
+            <Text style={styles.modalText}>Se eliminan también sus fotos, videos y línea de tiempo. No se puede deshacer.</Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity activeOpacity={0.85} style={styles.modalSecondary} onPress={() => setConfirmDelete(false)}>
+                <Text style={styles.modalButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity activeOpacity={0.85} style={styles.modalPrimary} disabled={busy} onPress={deleteSelected}>
+                <Text style={styles.modalButtonText}>{busy ? 'Borrando…' : 'Borrar'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  window: { flex: 1, backgroundColor: BG },
-
-  topBar: { position: 'absolute', top: d(16), left: d(20), zIndex: 10 },
-  topButton: {
-    height: d(22),
-    paddingHorizontal: d(13),
-    borderWidth: 1,
-    borderColor: RED,
-    borderRadius: 3,
-    justifyContent: 'center',
+  window: { flex: 1, backgroundColor: C.bg },
+  header: {
+    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(41,34,34,0.85)',
+    gap: d(14),
+    paddingLeft: d(30),
+    paddingRight: d(35),
+    paddingTop: d(17),
   },
-  topButtonText: { color: RED, fontFamily: MONO, fontSize: d(12) },
+  backButton: { width: d(49), height: d(49), borderRadius: d(13), backgroundColor: C.muted, alignItems: 'center', justifyContent: 'center' },
+  title: { color: C.text, fontFamily: VIGA, fontSize: d(22) },
+  count: { color: C.textDim, fontFamily: HELV, fontWeight: '700', fontSize: d(12), marginTop: d(4) },
+  headerButton: { width: d(98), height: d(43), borderRadius: d(14), alignItems: 'center', justifyContent: 'center' },
+  headerButtonEdit: { backgroundColor: C.redDark },
+  headerButtonCancel: { backgroundColor: '#5A4D4D' },
+  headerButtonText: { color: C.text, fontFamily: HELV, fontWeight: '700', fontSize: d(14) },
 
-  scroll: { flex: 1, marginTop: d(110) },
-  scrollContent: { paddingHorizontal: d(22), paddingBottom: d(20), gap: d(17) },
-
+  list: { flex: 1, marginTop: d(20) },
+  listContent: { paddingLeft: d(41), paddingRight: d(35), paddingBottom: d(24), gap: d(10) },
+  rowLine: { flexDirection: 'row', alignItems: 'center', gap: d(14) },
   row: {
-    height: d(52),
-    borderWidth: 2,
-    borderColor: RED,
-    borderRadius: 5,
-    backgroundColor: PANEL,
-    paddingLeft: d(20),
-    paddingRight: d(22),
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  rowTitle: { flexDirection: 'row', alignItems: 'center', gap: d(12), flexShrink: 1 },
-  rowText: { color: RED, fontFamily: MONO, fontSize: d(18), letterSpacing: 1, flexShrink: 1 },
-  statusTag: { color: '#F8E3E3', fontFamily: MONO, fontSize: d(10), letterSpacing: 0.5 },
-  statusTagWarn: { color: '#ffb347' },
-  moreButton: { paddingVertical: d(8), paddingLeft: d(8) },
-
-  dots: { flexDirection: 'row', gap: d(3) },
-  dot: { width: d(3), height: d(3), borderRadius: d(1.5), backgroundColor: RED },
-
-  cardPosition: { position: 'absolute', top: d(113), left: d(213) },
-  card: {
-    width: d(240),
-    minHeight: d(224),
-    borderWidth: 2,
-    borderColor: RED,
-    borderRadius: 5,
-    backgroundColor: PANEL,
-    paddingHorizontal: d(20),
-    paddingTop: d(16),
-    paddingBottom: d(14),
-  },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: d(8) },
-  cardMore: { marginTop: d(-6), marginRight: d(-10), padding: d(4) },
-  cardBody: { flex: 1, marginTop: d(14), gap: d(4) },
-  cardMeta: { color: '#9a8585', fontFamily: MONO, fontSize: d(10) },
-  cardWarn: { color: '#ffb347', fontFamily: MONO, fontSize: d(10) },
-  cardActions: { flexDirection: 'row', justifyContent: 'space-between', marginTop: d(12) },
-  cardAction: { color: RED, fontFamily: MONO, fontSize: d(11), letterSpacing: 0.5 },
-
-  emptyText: { color: '#6b5555', fontFamily: MONO, fontSize: 13, textAlign: 'center', paddingHorizontal: d(40) },
-
-  // Player
-  grid: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', flexWrap: 'wrap' },
-  tile: { width: '50%', height: '50%', overflow: 'hidden', borderColor: '#3a2e2e', backgroundColor: '#1c1818' },
-  tileLeftCol: { borderRightWidth: 1 },
-  tileTopRow: { borderBottomWidth: 1 },
-  tileExpanded: {
-    ...StyleSheet.absoluteFillObject,
-    width: '100%',
-    height: '100%',
-    borderRightWidth: 0,
-    borderBottomWidth: 0,
-    zIndex: 1,
-  },
-  tileHidden: { display: 'none' },
-  tileEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  tileEmptyText: { color: '#4a3c3c', fontFamily: MONO, fontSize: d(11), letterSpacing: 1 },
-  tileLabel: {
-    position: 'absolute',
-    paddingHorizontal: d(6),
-    paddingVertical: d(3),
-    borderRadius: 3,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
-  tileLabelExpanded: { left: d(18), top: d(46) },
-  tileLabelText: { color: RED, fontFamily: MONO, fontSize: d(10), fontWeight: '500', letterSpacing: 1 },
-  tileLabelStatus: { color: '#9a8585', fontFamily: MONO, fontSize: d(8) },
-
-  playerTopBar: {
-    position: 'absolute',
-    top: d(14),
-    left: d(18),
-    right: d(16),
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    zIndex: 5,
-  },
-  playerTopLeft: { flexDirection: 'row', gap: d(8) },
-  playerTitle: {
-    position: 'absolute',
-    left: d(160),
-    right: d(160),
-    textAlign: 'center',
-    color: RED,
-    fontFamily: MONO,
-    fontSize: d(14),
-    letterSpacing: 1,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowRadius: 4,
-  },
-  downloadsButton: {
-    height: d(22),
-    paddingHorizontal: d(12),
-    backgroundColor: '#C0C0C0',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  downloadsButtonText: { color: '#171717', fontFamily: MONO, fontSize: d(11), fontWeight: '500' },
-
-  banner: {
-    position: 'absolute',
-    top: d(44),
-    alignSelf: 'center',
-    paddingHorizontal: d(10),
-    paddingVertical: d(4),
-    borderRadius: 3,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    zIndex: 5,
-  },
-  bannerText: { color: '#ffb347', fontFamily: MONO, fontSize: d(10) },
-
-  timelineBar: {
-    position: 'absolute',
-    bottom: d(13),
-    left: d(40),
-    right: d(40),
-    height: d(48),
-    borderRadius: d(24),
-    backgroundColor: 'rgba(67, 58, 58, 0.92)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: d(14),
-    gap: d(12),
-    zIndex: 5,
-  },
-  playButton: {
-    width: d(30),
-    height: d(30),
-    borderRadius: d(15),
+    flex: 1,
+    height: d(43),
+    borderRadius: d(11),
+    backgroundColor: C.card,
     borderWidth: 1.5,
-    borderColor: RED,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  playButtonText: { color: RED, fontSize: d(11), fontFamily: MONO },
-  timeText: { color: '#F8E3E3', fontFamily: MONO, fontSize: d(10), minWidth: d(90) },
-  trackArea: { flex: 1, height: d(30), justifyContent: 'center' },
-  coverageRows: { position: 'absolute', top: d(3), left: 0, right: 0, gap: d(1) },
-  coverageRow: { height: d(2), position: 'relative' },
-  coverageFill: { position: 'absolute', top: 0, bottom: 0, borderRadius: 1, opacity: 0.8 },
-  track: { height: d(4), borderRadius: d(2), backgroundColor: '#2a2222', marginTop: d(8), overflow: 'hidden' },
-  trackFill: { height: '100%', backgroundColor: RED },
-  trackThumb: {
-    position: 'absolute',
-    top: d(15),
-    width: d(12),
-    height: d(12),
-    marginLeft: d(-6),
-    borderRadius: d(6),
-    backgroundColor: '#F8E3E3',
-  },
-  speedGroup: { flexDirection: 'row', gap: d(4) },
-  speedChip: { paddingHorizontal: d(6), paddingVertical: d(3), borderRadius: 3, borderWidth: 1, borderColor: '#6a4a4b' },
-  speedChipActive: { borderColor: RED, backgroundColor: 'rgba(232,61,61,0.15)' },
-  speedText: { color: '#8b7474', fontFamily: MONO, fontSize: d(9) },
-  speedTextActive: { color: RED },
-
-  // Downloads
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 20,
-  },
-  downloadsPanel: {
-    width: d(460),
-    maxWidth: '92%',
-    borderWidth: 2,
-    borderColor: RED,
-    borderRadius: 5,
-    backgroundColor: PANEL,
-    padding: d(16),
-    gap: d(8),
-  },
-  downloadsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  panelTitle: { color: RED, fontFamily: MONO, fontSize: d(14), letterSpacing: 1 },
-  panelClose: { color: RED, fontFamily: MONO, fontSize: d(14) },
-  panelHint: { color: '#9a8585', fontFamily: MONO, fontSize: d(10) },
-  panelWarn: { color: '#ffb347', fontFamily: MONO, fontSize: d(10) },
-  fileRow: {
+    borderColor: 'transparent',
+    paddingHorizontal: d(14),
     flexDirection: 'row',
     alignItems: 'center',
-    gap: d(10),
-    paddingVertical: d(6),
-    borderBottomWidth: 1,
-    borderBottomColor: '#3a2e2e',
+    gap: d(12),
   },
-  fileName: { color: '#F8E3E3', fontFamily: MONO, fontSize: d(11) },
-  fileLabel: { color: '#9a8585', fontFamily: MONO, fontSize: d(9) },
-  fileButton: {
-    minWidth: d(86),
-    height: d(22),
-    borderWidth: 1,
-    borderColor: RED,
-    borderRadius: 3,
+  rowEditing: { borderColor: C.red },
+  rowSelected: { backgroundColor: C.red, borderColor: C.red },
+  rowExpanded: { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
+  rowName: { color: C.text, fontFamily: HELV, fontWeight: '700', fontSize: d(14), maxWidth: d(260) },
+  rowMeta: { color: C.textDim, fontFamily: HELV, fontSize: d(12), flexShrink: 1 },
+  checkbox: {
+    width: d(19),
+    height: d(19),
+    borderRadius: d(4),
+    borderWidth: 2,
+    borderColor: C.red,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  fileButtonText: { color: RED, fontFamily: MONO, fontSize: d(10) },
-  fileButtonReady: { backgroundColor: RED },
+  checkboxOn: { backgroundColor: C.red },
+
+  // Expanded mission
+  detail: {
+    backgroundColor: '#2F2828',
+    borderBottomLeftRadius: d(11),
+    borderBottomRightRadius: d(11),
+    padding: d(14),
+    gap: d(10),
+  },
+  detailInfo: { color: C.textDim, fontFamily: HELV, fontWeight: '700', fontSize: d(11) },
+  detailColumns: { flexDirection: 'row', gap: d(14), height: d(210) },
+  timelineColumn: { width: '34%', borderRightWidth: 1, borderRightColor: C.divider, paddingRight: d(12) },
+  mediaColumn: { flex: 1 },
+  detailHeading: { color: C.text, fontFamily: VIGA, fontSize: d(14), marginBottom: d(6) },
+  eventRow: { flexDirection: 'row', gap: d(10) },
+  eventRail: { width: d(12), alignItems: 'center' },
+  eventDot: { width: d(9), height: d(9), borderRadius: d(4.5), backgroundColor: C.textFaint, marginTop: d(4) },
+  eventDotMedia: { backgroundColor: C.red },
+  eventLine: { flex: 1, width: 1.5, backgroundColor: C.divider, marginVertical: d(2) },
+  eventBody: { flex: 1, paddingBottom: d(10) },
+  eventTime: { color: C.textDim, fontFamily: HELV, fontWeight: '700', fontSize: d(10) },
+  eventText: { color: C.text, fontFamily: HELV, fontSize: d(12), marginTop: d(1) },
+
+  carousel: { flex: 1 },
+  carouselFrame: {
+    flex: 1,
+    borderRadius: d(12),
+    backgroundColor: '#1C1818',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  carouselMedia: { width: '100%', height: '100%' },
+  carouselArrow: {
+    position: 'absolute',
+    top: '50%',
+    marginTop: d(-16),
+    width: d(32),
+    height: d(32),
+    borderRadius: d(16),
+    backgroundColor: 'rgba(35,30,30,0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  carouselFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: d(8) },
+  carouselCaption: { color: C.textDim, fontFamily: HELV, fontWeight: '700', fontSize: d(11) },
+  carouselDots: { flexDirection: 'row', gap: d(5) },
+  carouselDot: { width: d(7), height: d(7), borderRadius: d(3.5), backgroundColor: '#D9D9D9' },
+  carouselDotActive: { width: d(20), backgroundColor: C.red },
+  carouselEmpty: { flex: 1, borderRadius: d(12), backgroundColor: '#1C1818', alignItems: 'center', justifyContent: 'center' },
+
+  empty: { color: C.textDim, fontFamily: HELV, fontWeight: '700', fontSize: d(13), textAlign: 'center', marginTop: d(60) },
+  emptySmall: { color: C.textFaint, fontFamily: HELV, fontSize: d(12) },
+
+  // Edit mode bottom panel (page 4)
+  editBar: {
+    position: 'absolute',
+    right: d(35),
+    bottom: d(12),
+    width: d(302),
+    height: d(70),
+    borderRadius: d(20),
+    backgroundColor: '#6B5E5E',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: d(15),
+  },
+  editBarButton: { height: d(40), borderRadius: d(12), alignItems: 'center', justifyContent: 'center' },
+  editDataButton: { width: d(150), backgroundColor: '#8C7F7D' },
+  deleteButton: { width: d(100), backgroundColor: C.red },
+  editBarText: { color: C.text, fontFamily: HELV, fontWeight: '700', fontSize: d(14) },
+  disabled: { opacity: 0.45 },
+
+  // Modals
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(40,34,34,0.6)', alignItems: 'center', justifyContent: 'center' },
+  modalCard: { width: d(380), borderRadius: d(22), backgroundColor: C.panel, padding: d(24) },
+  modalTitle: { color: C.text, fontFamily: VIGA, fontSize: d(20), marginBottom: d(6) },
+  modalText: { color: C.textDim, fontFamily: HELV, fontSize: d(13), lineHeight: d(18) },
+  label: { color: C.textSoft, fontFamily: HELV, fontWeight: '700', fontSize: d(10.5), marginTop: d(8), marginBottom: d(6) },
+  input: {
+    height: d(37),
+    backgroundColor: C.input,
+    borderWidth: 1,
+    borderColor: C.inputBorder,
+    borderRadius: d(13),
+    paddingHorizontal: d(14),
+    color: C.text,
+    fontFamily: HELV,
+    fontWeight: '700',
+    fontSize: d(13),
+  },
+  modalActions: { flexDirection: 'row', gap: d(14), marginTop: d(20) },
+  modalSecondary: { width: d(120), height: d(46), borderRadius: d(13), backgroundColor: '#3D3434', alignItems: 'center', justifyContent: 'center' },
+  modalPrimary: { flex: 1, height: d(46), borderRadius: d(13), backgroundColor: C.red, alignItems: 'center', justifyContent: 'center' },
+  modalButtonText: { color: C.text, fontFamily: HELV, fontWeight: '700', fontSize: d(14) },
 });

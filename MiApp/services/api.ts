@@ -15,7 +15,7 @@ const DOG_HEADERS = {
 };
 
 export interface RobotStatus {
-  battery: number;
+  battery: number | null;
   speed: number;
   status: string;
 }
@@ -109,8 +109,10 @@ export async function getRobotStatus(): Promise<RobotStatus> {
     headers: { Authorization: `Bearer ${DOG_TOKEN}` },
   });
   const json = await res.json().catch(() => ({}));
+  // No made-up default: an unknown battery must not show up as a healthy one.
+  const battery = Number(json?.telemetry?.battery ?? json?.battery);
   return {
-    battery: Number(json?.telemetry?.battery ?? json?.battery ?? 85),
+    battery: Number.isFinite(battery) ? battery : null,
     speed: Number(json?.limits?.max_linear_speed ?? 0),
     status: 'connected',
   };
@@ -238,9 +240,38 @@ export interface MisionGaleriaItem {
   duracionMs?: number;
 }
 
+/** One operator action during a mission, for the timeline in "Misiones y datos". */
+export interface MisionEvento {
+  /** Seconds since the mission started. */
+  t: number;
+  tipo: string;
+  texto: string;
+}
+
 export interface MisionContenido {
   edificios: any[];
   galeria: MisionGaleriaItem[];
+  operador?: string;
+  ubicacion?: string;
+  duracion_s?: number;
+  eventos?: MisionEvento[];
+}
+
+export function contenidoDeMision(descripcion: string | null): MisionContenido {
+  if (!descripcion) return { edificios: [], galeria: [] };
+  try {
+    const parsed = JSON.parse(descripcion);
+    // Older missions stored the buildings array directly.
+    if (Array.isArray(parsed)) return { edificios: parsed, galeria: [] };
+    return {
+      ...parsed,
+      edificios: Array.isArray(parsed?.edificios) ? parsed.edificios : [],
+      galeria: Array.isArray(parsed?.galeria) ? parsed.galeria : [],
+      eventos: Array.isArray(parsed?.eventos) ? parsed.eventos : [],
+    };
+  } catch {
+    return { edificios: [], galeria: [] };
+  }
 }
 
 const MISIONES_STORAGE_KEY = 'laika.misiones';
@@ -319,8 +350,7 @@ export async function getMisiones(): Promise<MisionResumen[]> {
   }
 }
 
-export async function finalizarMision(id: number, edificios: any[], galeria: MisionGaleriaItem[] = []): Promise<void> {
-  const contenido: MisionContenido = { edificios, galeria };
+export async function finalizarMision(id: number, contenido: MisionContenido): Promise<void> {
   const misiones = getMisionesLocales();
   const index = misiones.findIndex((m) => m.id_mision === id);
   if (index >= 0) {
@@ -336,8 +366,29 @@ export async function finalizarMision(id: number, edificios: any[], galeria: Mis
   await fetchWithTimeout(`${bUrl()}/misiones/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ edificios, galeria }),
+    body: JSON.stringify(contenido),
   });
+  } catch {}
+}
+
+/** Edit name / operator / location. The local copy always keeps them. */
+export async function actualizarDatosMision(
+  id: number,
+  datos: { nombre: string; operador: string; ubicacion: string },
+): Promise<void> {
+  const misiones = getMisionesLocales();
+  const index = misiones.findIndex((m) => m.id_mision === id);
+  if (index < 0) return;
+  const contenido = { ...contenidoDeMision(misiones[index].descripcion), operador: datos.operador, ubicacion: datos.ubicacion };
+  misiones[index] = { ...misiones[index], nombre: datos.nombre, descripcion: JSON.stringify(contenido) };
+  setMisionesLocales(misiones);
+  await renombrarMision(id, datos.nombre);
+  try {
+    await fetchWithTimeout(`${bUrl()}/misiones/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(contenido),
+    });
   } catch {}
 }
 

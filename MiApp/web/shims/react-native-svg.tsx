@@ -28,4 +28,28 @@ export function Line(props: React.SVGProps<SVGLineElement>) {
   return <line {...props} />;
 }
 
+export function Path(props: React.SVGProps<SVGPathElement>) {
+  return <path {...props} />;
+}
+
+export function Rect(props: React.SVGProps<SVGRectElement>) {
+  return <rect {...props} />;
+}
+
+export function Polyline(props: React.SVGProps<SVGPolylineElement>) {
+  return <polyline {...props} />;
+}
+
+export function Polygon(props: React.SVGProps<SVGPolygonElement>) {
+  return <polygon {...props} />;
+}
+
+export function Ellipse(props: React.SVGProps<SVGEllipseElement>) {
+  return <ellipse {...props} />;
+}
+
+export function G(props: React.SVGProps<SVGGElement>) {
+  return <g {...props} />;
+}
+
 export default Svg;

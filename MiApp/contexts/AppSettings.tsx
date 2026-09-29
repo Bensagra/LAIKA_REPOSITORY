@@ -1,8 +1,12 @@
 import React, { createContext, useContext, useState } from 'react';
 
-interface MisionActiva {
+export interface MisionActiva {
   id: number;
   nombre: string;
+  operador: string;
+  ubicacion: string;
+  /** Date.now() when the mission started; drives the mission timer. */
+  startedAt: number;
   /** Recording on the robot server (camera/thermal/LiDAR), if it could start. */
   serverMissionId?: string | null;
 }
@@ -10,6 +14,9 @@ interface MisionActiva {
 interface AppSettings {
   joystickEnabled: boolean;
   setJoystickEnabled: (v: boolean) => void;
+  /** 0–100. Stored only; nothing uses it yet. */
+  volume: number;
+  setVolume: (v: number) => void;
   loggedUser: string | null;
   setLoggedUser: (v: string | null) => void;
   misionActiva: MisionActiva | null;
@@ -17,14 +24,14 @@ interface AppSettings {
   robotSpeed: number;
   setRobotSpeed: (v: number) => void;
   videoResolution: number;
-  setVideoResolution: (v: number) => void;
   lidarMaxPoints: number;
-  setLidarMaxPoints: (v: number) => void;
 }
 
 const AppSettingsContext = createContext<AppSettings>({
   joystickEnabled: true,
   setJoystickEnabled: () => {},
+  volume: 35,
+  setVolume: () => {},
   loggedUser: null,
   setLoggedUser: () => {},
   misionActiva: null,
@@ -32,26 +39,28 @@ const AppSettingsContext = createContext<AppSettings>({
   robotSpeed: 50,
   setRobotSpeed: () => {},
   videoResolution: 640,
-  setVideoResolution: () => {},
   lidarMaxPoints: 30000,
-  setLidarMaxPoints: () => {},
 });
+
+// Video/LiDAR resolution have no UI in the new design: fixed values.
+const VIDEO_RESOLUTION = 640;
+const LIDAR_MAX_POINTS = 30000;
 
 export function AppSettingsProvider({ children }: { children: React.ReactNode }) {
   const [joystickEnabled, setJoystickEnabled] = useState(true);
+  const [volume, setVolume] = useState(35);
   const [loggedUser, setLoggedUser] = useState<string | null>(null);
   const [misionActiva, setMisionActiva] = useState<MisionActiva | null>(null);
   const [robotSpeed, setRobotSpeed] = useState(50);
-  const [videoResolution, setVideoResolution] = useState(640);
-  const [lidarMaxPoints, setLidarMaxPoints] = useState(30000);
   return (
     <AppSettingsContext.Provider value={{
       joystickEnabled, setJoystickEnabled,
+      volume, setVolume,
       loggedUser, setLoggedUser,
       misionActiva, setMisionActiva,
       robotSpeed, setRobotSpeed,
-      videoResolution, setVideoResolution,
-      lidarMaxPoints, setLidarMaxPoints,
+      videoResolution: VIDEO_RESOLUTION,
+      lidarMaxPoints: LIDAR_MAX_POINTS,
     }}>
       {children}
     </AppSettingsContext.Provider>

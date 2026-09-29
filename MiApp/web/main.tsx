@@ -4,13 +4,14 @@ import { AppRegistry } from 'react-native';
 import HomeScreen from '../app/index';
 import MisionScreen from '../app/mision';
 import DataScreen from '../app/data';
+import PrepararScreen from '../app/preparar';
 import { AppSettingsProvider } from '../contexts/AppSettings';
 
 import './styles.css';
 
 function getRoute() {
   const route = window.location.hash.replace(/^#/, '');
-  return route === '/mision' || route === '/data' ? route : '/';
+  return route === '/mision' || route === '/data' || route === '/preparar' ? route : '/';
 }
 
 function WebApp() {
@@ -28,6 +29,7 @@ function WebApp() {
 
   if (route === '/mision') return <MisionScreen />;
   if (route === '/data') return <DataScreen />;
+  if (route === '/preparar') return <PrepararScreen />;
   return <HomeScreen />;
 }
 
