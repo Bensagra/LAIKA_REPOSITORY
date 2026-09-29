@@ -4,6 +4,10 @@ import path from 'node:path';
 
 export default defineConfig({
   plugins: [react()],
+  // React Native Web's Animated cleanup calls global.cancelAnimationFrame.
+  define: {
+    global: 'globalThis',
+  },
   resolve: {
     alias: [
       {
