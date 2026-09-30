@@ -96,6 +96,16 @@ export class TalkClient {
   private maxSeconds = DEFAULT_MAX_SECONDS;
   private startedAt = 0;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
+  // Chunks from the worklet are queued, never sent straight from its
+  // onmessage handler: this screen's main thread (LiDAR/video rendering,
+  // the drive loop) can stall for a while and then process several queued
+  // postMessages back-to-back, which would burst-send PCM and trip the
+  // server's real-time rate limit even though the long-run average is fine.
+  // sendTimer drains at most one 40ms chunk per tick, so a stall just delays
+  // audio instead of bursting it; outgoingQueue is capped so a long stall
+  // drops old audio rather than queuing it up to dump later.
+  private outgoingQueue: ArrayBuffer[] = [];
+  private sendTimer: ReturnType<typeof setInterval> | null = null;
   private opening = false;
   private stopped = true;
   private listenersAttached = false;
@@ -141,6 +151,7 @@ export class TalkClient {
       this.opening = false;
       this.tick();
       this.tickTimer = setInterval(() => this.tick(), 1000);
+      this.sendTimer = setInterval(() => this.drainOneChunk(), CHUNK_SAMPLES / SAMPLE_RATE * 1000);
     } catch (err) {
       this.cleanup();
       throw err instanceof Error ? err : new Error('No se pudo abrir el micrófono');
@@ -246,7 +257,7 @@ export class TalkClient {
 
     const workletNode = new AudioWorkletNode(audioContext, 'go2-talk-processor');
     this.workletNode = workletNode;
-    workletNode.port.onmessage = (event) => this.sendChunk(event.data as ArrayBuffer);
+    workletNode.port.onmessage = (event) => this.enqueueChunk(event.data as ArrayBuffer);
 
     const sourceNode = audioContext.createMediaStreamSource(this.stream);
     this.sourceNode = sourceNode;
@@ -266,9 +277,20 @@ export class TalkClient {
     }
   }
 
-  private sendChunk(buffer: ArrayBuffer) {
+  private enqueueChunk(buffer: ArrayBuffer) {
+    if (this.stopped) return;
+    this.outgoingQueue.push(buffer);
+    // ~400ms of backlog; if the main thread stalls longer than that, drop
+    // the oldest audio instead of piling it up for a later burst.
+    while (this.outgoingQueue.length > 10) this.outgoingQueue.shift();
+  }
+
+  private drainOneChunk() {
+    if (this.stopped) return;
+    const buffer = this.outgoingQueue.shift();
+    if (!buffer) return;
     const ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN || this.stopped) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
     if (ws.bufferedAmount > MAX_BUFFERED_BYTES) {
       this.fail('La red es demasiado lenta para transmitir voz');
       return;
@@ -295,6 +317,8 @@ export class TalkClient {
   private cleanup() {
     this.detachGlobalListeners();
     if (this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = null; }
+    if (this.sendTimer) { clearInterval(this.sendTimer); this.sendTimer = null; }
+    this.outgoingQueue = [];
     if (this.ws) {
       this.ws.onmessage = null;
       this.ws.onclose = null;

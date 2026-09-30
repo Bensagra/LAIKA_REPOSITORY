@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Easing, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { crearMision, getMisiones, getRobotStatus } from '../services/api';
-import { startServerMission } from '../services/missions';
+import { getRobotStatus } from '../services/api';
+import { listServerMissions, startServerMission } from '../services/missions';
 import { connectRobotWS } from '../services/robotSocket';
 import { useAppSettings } from '../contexts/AppSettings';
 import { hasMicAndSpeaker, readDeviceBattery } from '../utils/device';
@@ -74,7 +74,7 @@ export default function PrepararScreen() {
 
   // Suggested name: next mission number.
   useEffect(() => {
-    getMisiones().then((list) => {
+    listServerMissions().then((list) => {
       if (!nameTouched.current) setNombre(`Misión ${String(list.length + 1).padStart(2, '0')}`);
     }).catch(() => {});
   }, []);
@@ -140,15 +140,16 @@ export default function PrepararScreen() {
     if (verifying || starting) return;
     setStarting(true);
     const name = nombre.trim() || 'Misión';
-    // Backend (:3000) mission and robot-server recording start together.
-    const [local, server] = await Promise.allSettled([crearMision(name), startServerMission(name)]);
+    const server = await startServerMission(name).catch(() => null);
+    if (!server) {
+      Alert.alert('Misión', 'No se pudo iniciar la grabación en el servidor: la misión va a continuar sin quedar guardada.');
+    }
     setMisionActiva({
-      id: local.status === 'fulfilled' ? local.value.id_mision : 0,
-      nombre: local.status === 'fulfilled' ? local.value.nombre : name,
+      nombre: server?.name ?? name,
       operador: operador.trim(),
       ubicacion: ubicacion.trim(),
       startedAt: Date.now(),
-      serverMissionId: server.status === 'fulfilled' ? server.value.mission_id : null,
+      serverMissionId: server?.mission_id ?? null,
     });
     router.replace('/mision');
   };

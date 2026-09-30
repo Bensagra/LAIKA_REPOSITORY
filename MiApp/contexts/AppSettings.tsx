@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState } from 'react';
 
 export interface MisionActiva {
-  id: number;
   nombre: string;
   operador: string;
   ubicacion: string;

@@ -25,15 +25,11 @@ import {
   DOG_ROBOT_ID,
   DOG_TOKEN,
   emergencyStop,
-  finalizarMision,
   getRobotStatus,
-  MisionEvento,
-  MisionGaleriaItem,
   moveRobotAxes,
   RobotStatus,
 } from '../services/api';
 import { TalkClient, TalkStatusMessage } from '../services/go2Talk';
-import { saveMissionVideo } from '../services/misionMedia';
 import { configureDogMedia, DEFAULT_SPEED_PROFILES, NETWORK_PROFILES } from '../services/operator';
 import { stopServerMission } from '../services/missions';
 import {
@@ -331,18 +327,12 @@ export default function MisionScreen() {
   const safetyPendingRef = useRef(false);
   const talkClientRef = useRef<TalkClient | null>(null);
   const keyStateRef = useRef<Set<string>>(new Set());
-  const eventosRef = useRef<MisionEvento[]>([]);
-  const galeriaRef = useRef<MisionGaleriaItem[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingDoneRef = useRef<Promise<void> | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const feedLabelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const feedIndexRef = useRef(0);
   feedIndexRef.current = feedIndex;
-
-  const addEvento = useCallback((tipo: string, texto: string) => {
-    eventosRef.current.push({ t: Math.round((Date.now() - startedAt) / 1000), tipo, texto });
-  }, [startedAt]);
 
   const showToast = useCallback((text: string, ok = true) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -378,7 +368,6 @@ export default function MisionScreen() {
 
   useEffect(() => {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-    addEvento('mision', 'Misión iniciada');
     const tick = setInterval(() => setNow(Date.now()), 1000);
     feedLabelTimerRef.current = setTimeout(() => setFeedLabelVisible(false), FEED_LABEL_MS);
     return () => {
@@ -387,18 +376,17 @@ export default function MisionScreen() {
       if (feedLabelTimerRef.current) clearTimeout(feedLabelTimerRef.current);
       if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
     };
-  }, [addEvento]);
+  }, []);
 
   // ── Camera carousel ──
   const selectFeed = useCallback((index: number) => {
     const next = (index + FEEDS.length) % FEEDS.length;
     if (next === feedIndexRef.current) return;
     setFeedIndex(next);
-    addEvento('camara', `Cámara: ${FEEDS[next].label}`);
     setFeedLabelVisible(true);
     if (feedLabelTimerRef.current) clearTimeout(feedLabelTimerRef.current);
     feedLabelTimerRef.current = setTimeout(() => setFeedLabelVisible(false), FEED_LABEL_MS);
-  }, [addEvento]);
+  }, []);
 
   // Swipe anywhere on the view (except the LiDAR view, where dragging orbits
   // the 3D map: there, swipe on the dots or scroll).
@@ -471,12 +459,7 @@ export default function MisionScreen() {
     };
     const disconnect = connectRobotWS({
       onOpen: () => { configureDogMedia(mediaSettings).catch(() => {}); },
-      onStatus: (connected) => {
-        setMediaConnected((prev) => {
-          if (prev !== connected) addEvento('conexion', connected ? 'Conexión con el robot' : 'Conexión perdida');
-          return connected;
-        });
-      },
+      onStatus: setMediaConnected,
       onNetBytes: () => { lastDataAtRef.current = Date.now(); },
       onVideoFrame: (uri, encodedAtMs) => {
         lastDataAtRef.current = Date.now();
@@ -530,7 +513,7 @@ export default function MisionScreen() {
       },
     });
     return disconnect;
-  }, [addEvento, lidarMaxPoints, videoResolution]);
+  }, [lidarMaxPoints, videoResolution]);
 
   useEffect(() => {
     if (!mediaConnected) return;
@@ -635,12 +618,10 @@ export default function MisionScreen() {
     if (!client) return;
     if (client.active) {
       client.stop();
-      addEvento('hablar', 'Micrófono cerrado');
       return;
     }
     try {
       await client.start({ apiBase: DOG_API_URL, token: DOG_TOKEN, robotId: DOG_ROBOT_ID });
-      addEvento('hablar', 'Micrófono abierto');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'No se pudo abrir el micrófono', false);
     }
@@ -655,7 +636,6 @@ export default function MisionScreen() {
       const result = await sendConfirmedCommand('set_flashlight', { brightness: next ? 10 : 0 });
       const enabled = !!result.enabled;
       setFlashlight(enabled);
-      addEvento('linterna', enabled ? 'Linterna encendida' : 'Linterna apagada');
       showToast(enabled ? 'Linterna encendida' : 'Linterna apagada');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'No se pudo cambiar la linterna', false);
@@ -674,7 +654,6 @@ export default function MisionScreen() {
       const result = await sendConfirmedCommand('set_safety', { enabled: next });
       const enabled = !!result.safety_enabled;
       setSafetyEnabled(enabled);
-      addEvento('antichoque', enabled ? 'Antichoque activado' : 'Antichoque desactivado');
       showToast(enabled ? 'Antichoque activado' : 'Antichoque desactivado');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'No se pudo cambiar el antichoque', false);
@@ -684,31 +663,39 @@ export default function MisionScreen() {
     }
   };
 
+  // The server already records camera.mp4 for the whole mission; this is
+  // just a quick local snapshot for the operator, downloaded on the spot
+  // (there is no local mission gallery to save it into anymore).
   const takePhoto = () => {
-    if (photoActive) return;
-    const canvas = Platform.OS === 'web'
-      ? document.getElementById('laika-camera-canvas') as HTMLCanvasElement | null
-      : null;
-    if (Platform.OS === 'web') {
-      const frameAge = lastFrameAtRef.current ? Date.now() - lastFrameAtRef.current : Infinity;
-      if (!canvas || !cameraHasFrames || canvas.width === 0 || frameAge > CAPTURE_MAX_AGE_MS) {
-        showToast('Sin imagen reciente de la cámara', false);
-        return;
-      }
+    if (photoActive || Platform.OS !== 'web') {
+      if (Platform.OS !== 'web') showToast('Captura disponible en la web', false);
+      return;
+    }
+    const canvas = document.getElementById('laika-camera-canvas') as HTMLCanvasElement | null;
+    const frameAge = lastFrameAtRef.current ? Date.now() - lastFrameAtRef.current : Infinity;
+    if (!canvas || !cameraHasFrames || canvas.width === 0 || frameAge > CAPTURE_MAX_AGE_MS) {
+      showToast('Sin imagen reciente de la cámara', false);
+      return;
     }
     setPhotoActive(true);
     setTimeout(() => setPhotoActive(false), PHOTO_HIGHLIGHT_MS);
-    const uri = canvas && cameraHasFrames && canvas.width > 0 ? canvas.toDataURL('image/jpeg', 0.9) : cameraUri;
-    if (!uri) {
-      showToast('Sin imagen de cámara', false);
-      return;
-    }
-    galeriaRef.current.push({ id: `captura-${Date.now()}`, tipo: 'captura', creado_at: new Date().toISOString(), uri });
-    addEvento('foto', 'Foto guardada');
-    showToast('Foto guardada');
+    canvas.toBlob((blob) => {
+      if (!blob) { showToast('Sin imagen de cámara', false); return; }
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `laika-${DOG_ROBOT_ID}-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      showToast('Foto descargada');
+    }, 'image/png');
   };
 
-  // Records the robot camera itself (canvas stream), no screen picker.
+  // The server already records camera.mp4 for the whole mission; this is a
+  // quick local clip download for the operator (canvas capture, web only),
+  // same reasoning as takePhoto above.
   const startRecording = () => {
     const canvas = Platform.OS === 'web'
       ? document.getElementById('laika-camera-canvas') as HTMLCanvasElement | null
@@ -724,26 +711,25 @@ export default function MisionScreen() {
     const began = Date.now();
     recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
     recordingDoneRef.current = new Promise<void>((resolve) => {
-      recorder.onstop = async () => {
+      recorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
         const durationMs = Date.now() - began;
-        const id = `video-${began}`;
-        try {
-          await saveMissionVideo(id, new Blob(chunks, { type: recorder.mimeType || 'video/webm' }));
-          galeriaRef.current.push({ id, tipo: 'video', creado_at: new Date(began).toISOString(), videoId: id, duracionMs: durationMs });
-          addEvento('video', `Video guardado · ${formatShort(durationMs / 1000)}`);
-          showToast(`Video guardado | ${formatShort(durationMs / 1000)}`);
-        } catch {
-          addEvento('video', 'No se pudo guardar el video');
-          showToast('No se pudo guardar el video', false);
-        }
+        const blob = new Blob(chunks, { type: recorder.mimeType || 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `laika-${DOG_ROBOT_ID}-${new Date(began).toISOString().replace(/[:.]/g, '-')}.webm`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        showToast(`Video descargado | ${formatShort(durationMs / 1000)}`);
         resolve();
       };
     });
     recorder.start(1000);
     recorderRef.current = recorder;
     setRecordingSince(began);
-    addEvento('grabar', 'Grabación iniciada');
   };
 
   const stopRecording = async () => {
@@ -759,30 +745,19 @@ export default function MisionScreen() {
     // Visual only for now: no robot command for stand/lie down yet.
     setPosture(value);
     setPostureOpen(false);
-    addEvento('postura', `Postura: ${value === 'parado' ? 'Parado' : 'Agachado'}`);
   };
 
   const finishMission = async () => {
     if (finishing) return;
     setFinishing(true);
     await stopRecording();
-    addEvento('mision', 'Misión finalizada');
     if (misionActiva?.serverMissionId) {
       try {
         await stopServerMission(misionActiva.serverMissionId);
-      } catch {
-        addEvento('servidor', 'No se pudo cerrar la grabación del servidor');
+      } catch (err) {
+        console.error('[stopServerMission] no se pudo finalizar la grabación', err);
+        showToast('No se pudo cerrar la grabación en el servidor', false);
       }
-    }
-    if (misionActiva && misionActiva.id > 0) {
-      await finalizarMision(misionActiva.id, {
-        edificios: [],
-        galeria: galeriaRef.current,
-        operador: misionActiva.operador,
-        ubicacion: misionActiva.ubicacion,
-        duracion_s: Math.round((Date.now() - startedAt) / 1000),
-        eventos: eventosRef.current,
-      }).catch(() => {});
     }
     setMisionActiva(null);
     router.replace('/');
