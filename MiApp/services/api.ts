@@ -16,6 +16,24 @@ export const DOG_API_URL = process.env.EXPO_PUBLIC_DOG_API_URL || 'http://181.93
 export const DOG_TOKEN = process.env.EXPO_PUBLIC_DOG_TOKEN || 'dev-operator-token';
 export const DOG_ROBOT_ID = process.env.EXPO_PUBLIC_DOG_ROBOT_ID || 'go2_01';
 
+// A page served over HTTPS can't fetch() or open a WebSocket against a plain
+// http(s)/ws(s) origin (mixed content): the browser blocks it silently, with
+// no app-visible error beyond a console entry. Surface it loudly once so it
+// doesn't look like a dead/unreachable server.
+let mixedContentWarned = false;
+export function warnIfMixedContent(url: string) {
+  if (mixedContentWarned) return;
+  if (typeof window === 'undefined' || window.location?.protocol !== 'https:') return;
+  if (!url.startsWith('http://') && !url.startsWith('ws://')) return;
+  mixedContentWarned = true;
+  console.error(
+    `Mixed content: esta página está en HTTPS pero intenta usar ${url} (sin cifrar). ` +
+    'El navegador bloquea esa conexión. Servi la API del robot por HTTPS/WSS (proxy con TLS o un túnel) ' +
+    'y configurá EXPO_PUBLIC_DOG_API_URL con la URL https:// correspondiente.'
+  );
+}
+warnIfMixedContent(DOG_API_URL);
+
 const DOG_HEADERS = {
   'Content-Type': 'application/json',
   Authorization: `Bearer ${DOG_TOKEN}`,

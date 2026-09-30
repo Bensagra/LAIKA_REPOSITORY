@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { DOG_API_URL, DOG_ROBOT_ID, DOG_TOKEN } from './api';
+import { DOG_API_URL, DOG_ROBOT_ID, DOG_TOKEN, warnIfMixedContent } from './api';
 
 // Handy: browser mic -> PCM16 mono 16kHz -> wss://.../ws/talk/{robot_id} -> edge
 // -> Go2 speaker. Exclusive per robot, 20s max turn, server/edge also enforce
@@ -192,6 +192,7 @@ export class TalkClient {
     return new Promise((resolve, reject) => {
       const base = apiBase.replace(/^http/, 'ws').replace(/\/$/, '');
       const url = `${base}/ws/talk/${encodeURIComponent(robotId)}?token=${encodeURIComponent(token)}`;
+      warnIfMixedContent(url);
       let settled = false;
       let socket: WebSocket;
       try {

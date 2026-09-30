@@ -1,5 +1,5 @@
 import { inflate } from 'pako';
-import { activateDogControl, DOG_API_URL, DOG_ROBOT_ID, DOG_TOKEN, sendDogCommandWithId } from './api';
+import { activateDogControl, DOG_API_URL, DOG_ROBOT_ID, DOG_TOKEN, sendDogCommandWithId, warnIfMixedContent } from './api';
 
 export type VideoFrameCallback = (dataUri: string, encodedAtMs?: number) => void;
 export type VideoTickCallback = (encodedAtMs?: number) => void;
@@ -457,7 +457,9 @@ function handleJsonMessage(msg: any): void {
 
 function buildWsUrl(): string {
   const base = DOG_API_URL.replace(/^http/, 'ws');
-  return `${base}/ws/live?token=${encodeURIComponent(DOG_TOKEN)}`;
+  const url = `${base}/ws/live?token=${encodeURIComponent(DOG_TOKEN)}`;
+  warnIfMixedContent(url);
+  return url;
 }
 
 function doConnect(gen: number): void {

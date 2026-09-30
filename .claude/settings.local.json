@@ -15,7 +15,8 @@
       "Bash(curl -sS -m 6 -o /dev/null -w \"MISSIONS_API HTTP_STATUS=%{http_code} TIME=%{time_total}s\\\\n\" http://10.4.13.35:3000/)",
       "Bash(rm -rf dist)",
       "Bash(EXPO_PUBLIC_DOG_API_URL=\"https://example-override.test:9999\" npx vite build)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(echo \"EXIT=$?\")"
     ]
   }
 }
