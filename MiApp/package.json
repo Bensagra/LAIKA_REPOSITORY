@@ -9,6 +9,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "web:noexpo": "vite --host 127.0.0.1 --port 8081",
+    "build": "vite build",
     "web:prod": "vite build && vite preview --host 127.0.0.1 --port 8081",
     "lint": "expo lint"
   },

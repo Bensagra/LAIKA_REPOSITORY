@@ -1,0 +1,6 @@
+{
+  "framework": null,
+  "installCommand": "npm ci --prefix MiApp",
+  "buildCommand": "npm run build --prefix MiApp",
+  "outputDirectory": "MiApp/dist"
+}

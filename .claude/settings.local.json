@@ -2,7 +2,15 @@
   "permissions": {
     "allow": [
       "Bash(vercel --version)",
-      "Bash(npx --yes vercel whoami)"
+      "Bash(npx --yes vercel whoami)",
+      "Bash(npx vite *)",
+      "Bash(rm -rf MiApp/dist)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(tail -60 \"C:/Users/49377944/AppData/Local/npm-cache/_logs/2026-09-30T12_35_04_676Z-debug-0.log\" 2>&1)",
+      "Read(//c/Users/49377944/AppData/Local/npm-cache/_logs/**)",
+      "Bash(rm -rf MiApp/node_modules MiApp/dist)",
+      "Bash(npm ci *)"
     ]
   }
 }
