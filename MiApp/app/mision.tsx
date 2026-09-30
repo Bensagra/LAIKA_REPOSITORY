@@ -21,6 +21,9 @@ import { useDeviceBattery } from '../utils/device';
 import Icon, { IconName, WifiIcon } from '../components/Icons';
 import LidarReconstruction, { LidarSink, LidarSinkFrame } from '../components/LidarReconstruction';
 import {
+  DOG_API_URL,
+  DOG_ROBOT_ID,
+  DOG_TOKEN,
   emergencyStop,
   finalizarMision,
   getRobotStatus,
@@ -29,6 +32,7 @@ import {
   moveRobotAxes,
   RobotStatus,
 } from '../services/api';
+import { TalkClient, TalkStatusMessage } from '../services/go2Talk';
 import { saveMissionVideo } from '../services/misionMedia';
 import { configureDogMedia, DEFAULT_SPEED_PROFILES, NETWORK_PROFILES } from '../services/operator';
 import { stopServerMission } from '../services/missions';
@@ -36,11 +40,14 @@ import {
   connectRobotWS,
   registerThermalCanvas,
   registerVideoCanvas,
+  sendConfirmedCommand,
   sendRobotDrive,
   sendRobotDriveStop,
   sendRobotHeartbeat,
   ThermalFrameMeta,
 } from '../services/robotSocket';
+
+const CAPTURE_MAX_AGE_MS = 3000;
 
 // Mission screen (PDF pages 5, 6, 9, 10–12, 17, 18).
 
@@ -300,8 +307,11 @@ export default function MisionScreen() {
   const [rttMs, setRttMs] = useState<number | null>(null);
 
   const [talking, setTalking] = useState(false);
-  const [siren, setSiren] = useState(false);
+  const [talkRemaining, setTalkRemaining] = useState<number | null>(null);
   const [flashlight, setFlashlight] = useState(false);
+  const [flashlightPending, setFlashlightPending] = useState(false);
+  const [safetyEnabled, setSafetyEnabled] = useState(false);
+  const [safetyPending, setSafetyPending] = useState(false);
   const [photoActive, setPhotoActive] = useState(false);
   const [recordingSince, setRecordingSince] = useState<number | null>(null);
   const [postureOpen, setPostureOpen] = useState(false);
@@ -316,6 +326,10 @@ export default function MisionScreen() {
   const lastTelemetryUiRef = useRef(0);
   const lastLidarUiRef = useRef(0);
   const lastThermalUiRef = useRef(0);
+  const lastFrameAtRef = useRef(0);
+  const flashlightPendingRef = useRef(false);
+  const safetyPendingRef = useRef(false);
+  const talkClientRef = useRef<TalkClient | null>(null);
   const keyStateRef = useRef<Set<string>>(new Set());
   const eventosRef = useRef<MisionEvento[]>([]);
   const galeriaRef = useRef<MisionGaleriaItem[]>([]);
@@ -335,6 +349,32 @@ export default function MisionScreen() {
     setToast({ text, ok });
     toastTimerRef.current = setTimeout(() => setToast(null), TOAST_MS);
   }, []);
+
+  // Handy: one TalkClient per screen, torn down on unmount so the 20s turn
+  // and the mic always get released.
+  useEffect(() => {
+    const client = new TalkClient((message: TalkStatusMessage) => {
+      if (message.status === 'opening') {
+        setTalking(true);
+        setTalkRemaining(null);
+      } else if (message.status === 'talking') {
+        setTalking(true);
+        setTalkRemaining(message.remaining);
+      } else if (message.status === 'stopped') {
+        setTalking(false);
+        setTalkRemaining(null);
+      } else {
+        setTalking(false);
+        setTalkRemaining(null);
+        showToast(message.error, false);
+      }
+    });
+    talkClientRef.current = client;
+    return () => {
+      client.dispose();
+      talkClientRef.current = null;
+    };
+  }, [showToast]);
 
   useEffect(() => {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
@@ -438,18 +478,31 @@ export default function MisionScreen() {
         });
       },
       onNetBytes: () => { lastDataAtRef.current = Date.now(); },
-      onVideoFrame: (uri) => {
+      onVideoFrame: (uri, encodedAtMs) => {
         lastDataAtRef.current = Date.now();
         if (Platform.OS !== 'web') setCameraUri(uri);
         setCameraHasFrames(true);
+        lastFrameAtRef.current = encodedAtMs ?? Date.now();
       },
-      onVideoTick: () => setCameraHasFrames(true),
+      onVideoTick: (encodedAtMs) => {
+        setCameraHasFrames(true);
+        lastFrameAtRef.current = encodedAtMs ?? Date.now();
+      },
       onTelemetry: (data) => {
         const t = Date.now();
         lastDataAtRef.current = t;
+        const record = data as Record<string, any>;
+        if (!flashlightPendingRef.current) {
+          const brightness = record?.flashlight?.brightness;
+          if (brightness != null) setFlashlight(Number(brightness) > 0);
+        }
+        if (!safetyPendingRef.current) {
+          const enabled = record?.safety?.enabled;
+          if (enabled != null) setSafetyEnabled(!!enabled);
+        }
         if (t - lastTelemetryUiRef.current < 500) return;
         lastTelemetryUiRef.current = t;
-        setTelemetry(data as Record<string, any>);
+        setTelemetry(record);
       },
       onLidar: (points, count, meta) => {
         // Every frame goes to the 3D map (deltas only carry new points).
@@ -577,17 +630,74 @@ export default function MisionScreen() {
   }, [robotSpeed]);
 
   // ── Action bar ──
-  const toggleTalk = () => setTalking((v) => { addEvento('hablar', v ? 'Micrófono cerrado' : 'Micrófono abierto'); return !v; });
-  const toggleSiren = () => setSiren((v) => { addEvento('sirena', v ? 'Sirena apagada' : 'Sirena encendida'); return !v; });
-  const toggleLight = () => setFlashlight((v) => { addEvento('linterna', v ? 'Linterna apagada' : 'Linterna encendida'); return !v; });
+  const toggleTalk = async () => {
+    const client = talkClientRef.current;
+    if (!client) return;
+    if (client.active) {
+      client.stop();
+      addEvento('hablar', 'Micrófono cerrado');
+      return;
+    }
+    try {
+      await client.start({ apiBase: DOG_API_URL, token: DOG_TOKEN, robotId: DOG_ROBOT_ID });
+      addEvento('hablar', 'Micrófono abierto');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'No se pudo abrir el micrófono', false);
+    }
+  };
+
+  const toggleLight = async () => {
+    if (flashlightPendingRef.current) return;
+    flashlightPendingRef.current = true;
+    setFlashlightPending(true);
+    const next = !flashlight;
+    try {
+      const result = await sendConfirmedCommand('set_flashlight', { brightness: next ? 10 : 0 });
+      const enabled = !!result.enabled;
+      setFlashlight(enabled);
+      addEvento('linterna', enabled ? 'Linterna encendida' : 'Linterna apagada');
+      showToast(enabled ? 'Linterna encendida' : 'Linterna apagada');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'No se pudo cambiar la linterna', false);
+    } finally {
+      flashlightPendingRef.current = false;
+      setFlashlightPending(false);
+    }
+  };
+
+  const toggleSafety = async () => {
+    if (safetyPendingRef.current) return;
+    safetyPendingRef.current = true;
+    setSafetyPending(true);
+    const next = !safetyEnabled;
+    try {
+      const result = await sendConfirmedCommand('set_safety', { enabled: next });
+      const enabled = !!result.safety_enabled;
+      setSafetyEnabled(enabled);
+      addEvento('antichoque', enabled ? 'Antichoque activado' : 'Antichoque desactivado');
+      showToast(enabled ? 'Antichoque activado' : 'Antichoque desactivado');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'No se pudo cambiar el antichoque', false);
+    } finally {
+      safetyPendingRef.current = false;
+      setSafetyPending(false);
+    }
+  };
 
   const takePhoto = () => {
     if (photoActive) return;
-    setPhotoActive(true);
-    setTimeout(() => setPhotoActive(false), PHOTO_HIGHLIGHT_MS);
     const canvas = Platform.OS === 'web'
       ? document.getElementById('laika-camera-canvas') as HTMLCanvasElement | null
       : null;
+    if (Platform.OS === 'web') {
+      const frameAge = lastFrameAtRef.current ? Date.now() - lastFrameAtRef.current : Infinity;
+      if (!canvas || !cameraHasFrames || canvas.width === 0 || frameAge > CAPTURE_MAX_AGE_MS) {
+        showToast('Sin imagen reciente de la cámara', false);
+        return;
+      }
+    }
+    setPhotoActive(true);
+    setTimeout(() => setPhotoActive(false), PHOTO_HIGHLIGHT_MS);
     const uri = canvas && cameraHasFrames && canvas.width > 0 ? canvas.toDataURL('image/jpeg', 0.9) : cameraUri;
     if (!uri) {
       showToast('Sin imagen de cámara', false);
@@ -692,9 +802,30 @@ export default function MisionScreen() {
   const missionSeconds = (now - startedAt) / 1000;
 
   const actions: { key: string; label: string; icon: IconName; active: boolean; chip?: string; onPress: () => void }[] = [
-    { key: 'hablar', label: 'Hablar', icon: 'mic', active: talking, chip: 'Micrófono abierto', onPress: toggleTalk },
-    { key: 'sirena', label: 'Sirena', icon: 'siren', active: siren, chip: 'Sirena sonando', onPress: toggleSiren },
-    { key: 'linterna', label: 'Linterna', icon: 'flashlight', active: flashlight, chip: 'Linterna encendida', onPress: toggleLight },
+    {
+      key: 'hablar',
+      label: 'Hablar',
+      icon: 'mic',
+      active: talking,
+      chip: talkRemaining != null ? `Transmitiendo: ${talkRemaining}s` : 'Abriendo micrófono…',
+      onPress: toggleTalk,
+    },
+    {
+      key: 'antichoque',
+      label: 'Antichoque',
+      icon: 'shield',
+      active: safetyEnabled || safetyPending,
+      chip: safetyPending ? 'Esperando confirmación' : 'Antichoque activado',
+      onPress: toggleSafety,
+    },
+    {
+      key: 'linterna',
+      label: 'Linterna',
+      icon: 'flashlight',
+      active: flashlight || flashlightPending,
+      chip: flashlightPending ? 'Esperando confirmación' : 'Linterna encendida',
+      onPress: toggleLight,
+    },
     { key: 'foto', label: 'Foto', icon: 'camera', active: photoActive, onPress: takePhoto },
     {
       key: 'grabar',

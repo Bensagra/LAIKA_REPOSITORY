@@ -82,6 +82,24 @@ export async function sendDogCommand(type: string, payload: Record<string, unkno
   });
 }
 
+/** Same as sendDogCommand but with a caller-chosen command_id, so the reply can be matched to a command_ack on /ws/live. */
+export async function sendDogCommandWithId(
+  type: string,
+  payload: Record<string, unknown> = {},
+  commandId: string,
+  ttlMs = 3000
+): Promise<void> {
+  await fetchDog(`/api/robots/${DOG_ROBOT_ID}/commands`, {
+    method: 'POST',
+    body: JSON.stringify({
+      command_id: commandId,
+      type,
+      payload,
+      ttl_ms: ttlMs,
+    }),
+  });
+}
+
 export async function configureDogVisualStreams(cameraEnabled = true, lidarEnabled = true): Promise<void> {
   await activateDogControl();
   await sendDogCommand('set_camera_stream', {

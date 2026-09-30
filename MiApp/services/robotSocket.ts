@@ -1,8 +1,8 @@
 import { inflate } from 'pako';
-import { activateDogControl, DOG_API_URL, DOG_ROBOT_ID, DOG_TOKEN } from './api';
+import { activateDogControl, DOG_API_URL, DOG_ROBOT_ID, DOG_TOKEN, sendDogCommandWithId } from './api';
 
-export type VideoFrameCallback = (dataUri: string) => void;
-export type VideoTickCallback = () => void;
+export type VideoFrameCallback = (dataUri: string, encodedAtMs?: number) => void;
+export type VideoTickCallback = (encodedAtMs?: number) => void;
 export type TelemetryCallback = (data: Record<string, unknown>) => void;
 export type StatusCallback = (connected: boolean) => void;
 export type LidarFrameMeta = {
@@ -54,6 +54,44 @@ let cbAudio: AudioCallback | null = null;
 let cbNetBytes: NetBytesCallback | null = null;
 let cbThermal: ThermalCallback | null = null;
 
+// Confirmed commands (linterna/antichoque): resolved from the command_ack
+// that arrives on this same /ws/live connection, matched by command_id.
+type PendingAck = {
+  resolve: (result: Record<string, unknown>) => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+const pendingAcks = new Map<string, PendingAck>();
+let commandSeq = 0;
+
+function generateCommandId(): string {
+  commandSeq += 1;
+  return `web-${Date.now()}-${commandSeq}`;
+}
+
+/** Sends a command and waits for its command_ack (status executed/error/rejected) on /ws/live. Resolves with ack.result. */
+export function sendConfirmedCommand(
+  type: string,
+  payload: Record<string, unknown>,
+  timeoutMs = 8000,
+  ttlMs = 3000
+): Promise<Record<string, unknown>> {
+  const commandId = generateCommandId();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingAcks.delete(commandId);
+      reject(new Error('Tiempo de espera agotado esperando confirmación del robot'));
+    }, timeoutMs);
+    pendingAcks.set(commandId, { resolve, reject, timer });
+    sendDogCommandWithId(type, payload, commandId, ttlMs).catch((err) => {
+      if (!pendingAcks.has(commandId)) return;
+      pendingAcks.delete(commandId);
+      clearTimeout(timer);
+      reject(err instanceof Error ? err : new Error('No se pudo enviar el comando'));
+    });
+  });
+}
+
 function uint8ToBase64(bytes: Uint8Array): string {
   const chunk = 8192;
   let str = '';
@@ -99,6 +137,9 @@ const videoDecoder = {
   needKeyframe: true,
   frameCount: 0,
   unsupportedLogged: false,
+  // encoded_ts (ms) of each frame submitted to the decoder, FIFO-matched to
+  // its decoded output so captureCanvas can reject stale frames (>3s old).
+  pendingTimestamps: [] as number[],
 };
 
 function resetVideoDecoder(): void {
@@ -110,14 +151,16 @@ function resetVideoDecoder(): void {
   videoDecoder.codec = '';
   videoDecoder.needKeyframe = true;
   videoDecoder.frameCount = 0;
+  videoDecoder.pendingTimestamps = [];
 }
 
 function handleDecodedVideoFrame(frame: any): void {
+  const encodedAtMs = videoDecoder.pendingTimestamps.shift();
   try {
     const w = frame.displayWidth || frame.codedWidth;
     const h = frame.displayHeight || frame.codedHeight;
     drawToCanvases(frame, w, h);
-    cbVideoTick?.();
+    cbVideoTick?.(encodedAtMs);
   } catch {} finally {
     frame.close();
   }
@@ -147,7 +190,7 @@ function ensureVideoDecoder(codec: string): boolean {
   return true;
 }
 
-function decodeH264(header: Record<string, unknown>, bytes: Uint8Array): void {
+function decodeH264(header: Record<string, unknown>, bytes: Uint8Array, encodedAtMs?: number): void {
   if (!webCodecsAvailable()) {
     if (!videoDecoder.unsupportedLogged) {
       videoDecoder.unsupportedLogged = true;
@@ -176,6 +219,7 @@ function decodeH264(header: Record<string, unknown>, bytes: Uint8Array): void {
       timestamp,
       data: bytes,
     }));
+    vd.pendingTimestamps.push(encodedAtMs ?? Date.now());
   } catch {
     resetVideoDecoder();
   }
@@ -280,6 +324,14 @@ function parseLidar(header: Record<string, unknown>, payload: Uint8Array, frameB
   } catch {}
 }
 
+// header.encoded_ts / header.ts are Unix seconds from the edge; propagated via
+// onVideoTick so mision.tsx can reject stale captures (foto button, >3s old).
+function frameTimestampMs(header: Record<string, unknown>): number | undefined {
+  const raw = header.encoded_ts ?? header.ts;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n * 1000 : undefined;
+}
+
 function parseFrame(buffer: ArrayBuffer): void {
   if (buffer.byteLength < 6) return;
   const view = new DataView(buffer);
@@ -300,14 +352,15 @@ function parseFrame(buffer: ArrayBuffer): void {
   cbNetBytes?.(stream, buffer.byteLength);
 
   if (stream === 'video') {
+    const encodedAtMs = frameTimestampMs(header);
     if (String(header.image_format ?? '') === 'h264') {
-      decodeH264(header, payload);
+      decodeH264(header, payload, encodedAtMs);
       return;
     }
     const mime = mimeFor(header.image_format);
     // Web: frames go straight to the canvas; skip the costly base64 encode.
-    if (enqueueImage(videoQueue, payload, mime, () => cbVideoTick?.())) return;
-    cbVideo?.(`data:${mime};base64,${uint8ToBase64(payload)}`);
+    if (enqueueImage(videoQueue, payload, mime, () => cbVideoTick?.(encodedAtMs))) return;
+    cbVideo?.(`data:${mime};base64,${uint8ToBase64(payload)}`, encodedAtMs);
     return;
   }
 
@@ -379,8 +432,21 @@ function handleJsonMessage(msg: any): void {
   }
 
   if (type === 'command_ack') {
-    cbCommandAck?.((msg.data ?? {}) as Record<string, unknown>);
+    const data = (msg.data ?? {}) as Record<string, unknown>;
+    cbCommandAck?.(data);
     cbEvent?.(type, msg.data ?? msg);
+    const commandId = data.command_id ? String(data.command_id) : '';
+    const status = String(data.status ?? '');
+    const pending = commandId ? pendingAcks.get(commandId) : undefined;
+    if (pending && (status === 'executed' || status === 'error' || status === 'rejected')) {
+      pendingAcks.delete(commandId);
+      clearTimeout(pending.timer);
+      if (status === 'executed') {
+        pending.resolve((data.result ?? {}) as Record<string, unknown>);
+      } else {
+        pending.reject(new Error(String(data.reason ?? data.error ?? 'El robot rechazó el comando')));
+      }
+    }
     return;
   }
 

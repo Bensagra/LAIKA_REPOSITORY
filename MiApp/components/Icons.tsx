@@ -7,7 +7,7 @@ import Svg, { Circle, Ellipse, Line, Path, Polyline, Rect } from 'react-native-s
 export type IconName =
   | 'gear' | 'chevronDown' | 'chevronUp' | 'chevronLeft' | 'chevronRight' | 'play' | 'folder'
   | 'user' | 'close' | 'arrowLeft' | 'arrowRight' | 'home' | 'check' | 'plus' | 'minus'
-  | 'mic' | 'siren' | 'flashlight' | 'camera' | 'record' | 'stop' | 'paw'
+  | 'mic' | 'siren' | 'flashlight' | 'camera' | 'record' | 'stop' | 'paw' | 'shield'
   | 'batteryRobot' | 'phone' | 'dogStanding' | 'dogLying';
 
 interface IconProps {
@@ -152,6 +152,15 @@ export default function Icon({ name, size = 24, color = '#F8E3E3', strokeWidth =
           <Circle cx={12} cy={12} r={9} {...stroke} />
           <Rect x={8.5} y={8.5} width={7} height={7} rx={1} {...solid} />
         </>
+      );
+      break;
+    case 'shield':
+      // Lucide "shield" outline (ISC), used for the anti-collision toggle.
+      body = (
+        <Path
+          d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.79 17 5 19 5a1 1 0 0 1 1 1z"
+          {...stroke}
+        />
       );
       break;
     case 'paw':
