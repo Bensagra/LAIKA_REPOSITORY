@@ -1,13 +1,20 @@
 
-let _backendHost = '10.4.13.35';
+// Same idea as DOG_API_URL above: EXPO_PUBLIC_BACKEND_HOST overrides this
+// default, which is a LAN address and unreachable once this runs outside
+// that network (e.g. deployed on Vercel). Also overridable at runtime from
+// the login screen (see setBackendHost / BACKEND_IP_KEY in app/index.tsx).
+let _backendHost = process.env.EXPO_PUBLIC_BACKEND_HOST || '10.4.13.35';
 export function setBackendHost(ip: string) { _backendHost = ip.trim().replace(/\/$/, ''); }
 export function getBackendHost() { return _backendHost; }
 const bUrl = () => `http://${_backendHost}:3000`;
 const dUrl = () => `http://${_backendHost}:3001`;
 
-export const DOG_API_URL = 'http://181.93.94.107:8000';
-export const DOG_TOKEN = 'dev-operator-token';
-export const DOG_ROBOT_ID = 'go2_01';
+// Configurable via EXPO_PUBLIC_* env vars: MiApp/.env(.local) for local dev,
+// Vercel Project Settings > Environment Variables for the deployed build.
+// The literals below are only the dev fallback used when nothing is set.
+export const DOG_API_URL = process.env.EXPO_PUBLIC_DOG_API_URL || 'http://181.93.94.107:8000';
+export const DOG_TOKEN = process.env.EXPO_PUBLIC_DOG_TOKEN || 'dev-operator-token';
+export const DOG_ROBOT_ID = process.env.EXPO_PUBLIC_DOG_ROBOT_ID || 'go2_01';
 
 const DOG_HEADERS = {
   'Content-Type': 'application/json',
