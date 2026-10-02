@@ -8,7 +8,8 @@ export type IconName =
   | 'gear' | 'chevronDown' | 'chevronUp' | 'chevronLeft' | 'chevronRight' | 'play' | 'folder'
   | 'user' | 'close' | 'arrowLeft' | 'arrowRight' | 'home' | 'check' | 'plus' | 'minus'
   | 'mic' | 'siren' | 'flashlight' | 'camera' | 'record' | 'stop' | 'paw' | 'shield'
-  | 'batteryRobot' | 'phone' | 'dogStanding' | 'dogLying';
+  | 'batteryRobot' | 'phone' | 'dogStanding' | 'dogLying'
+  | 'grid' | 'images' | 'chart' | 'notes' | 'download' | 'pause' | 'clock';
 
 interface IconProps {
   name: IconName;
@@ -206,6 +207,68 @@ export default function Icon({ name, size = 24, color = '#F8E3E3', strokeWidth =
           d="M2.5 12.5l2-1.6.4-2 1.5 1.2 1.2-.2 1.8 1.7 6.4.6c1.8.2 3.4 1.2 4.2 2.8l.9 1.8h-2.2l-.6-.9-.4 1.6H4.8l2-1.2-.6-2.3-2.2.6z"
           {...solid}
         />
+      );
+      break;
+    case 'grid':
+      body = (
+        <>
+          <Rect x={3} y={3} width={8} height={8} rx={1.5} {...stroke} />
+          <Rect x={13} y={3} width={8} height={8} rx={1.5} {...stroke} />
+          <Rect x={3} y={13} width={8} height={8} rx={1.5} {...stroke} />
+          <Rect x={13} y={13} width={8} height={8} rx={1.5} {...stroke} />
+        </>
+      );
+      break;
+    case 'images':
+      body = (
+        <>
+          <Rect x={2.5} y={5.5} width={15} height={13} rx={2} {...stroke} />
+          <Circle cx={8} cy={10.5} r={1.7} {...stroke} />
+          <Path d="M3 17l4.2-4.2a2 2 0 0 1 2.8 0L13 15.8" {...stroke} />
+          <Path d="M8 5.5V4a1.5 1.5 0 0 1 1.5-1.5h9A1.5 1.5 0 0 1 20 4v10.5a1.5 1.5 0 0 1-1.5 1.5H17" {...stroke} />
+        </>
+      );
+      break;
+    case 'chart':
+      body = (
+        <>
+          <Polyline points="3 17 9 10 13.5 14 21 5.5" {...stroke} />
+          <Polyline points="15 5.5 21 5.5 21 11.5" {...stroke} />
+        </>
+      );
+      break;
+    case 'notes':
+      body = (
+        <>
+          <Path d="M6 3h9l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" {...stroke} />
+          <Line x1={8} y1={12} x2={16} y2={12} {...stroke} />
+          <Line x1={8} y1={16} x2={13} y2={16} {...stroke} />
+        </>
+      );
+      break;
+    case 'download':
+      body = (
+        <>
+          <Path d="M12 3v12" {...stroke} />
+          <Polyline points="7 10.5 12 15.5 17 10.5" {...stroke} />
+          <Path d="M4 19.5h16" {...stroke} />
+        </>
+      );
+      break;
+    case 'pause':
+      body = (
+        <>
+          <Rect x={6} y={5} width={4} height={14} rx={1} {...solid} />
+          <Rect x={14} y={5} width={4} height={14} rx={1} {...solid} />
+        </>
+      );
+      break;
+    case 'clock':
+      body = (
+        <>
+          <Circle cx={12} cy={12} r={9} {...stroke} />
+          <Polyline points="12 7 12 12 16 14" {...stroke} />
+        </>
       );
       break;
   }

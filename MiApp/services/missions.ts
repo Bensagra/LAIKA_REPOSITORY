@@ -112,6 +112,39 @@ export const MISSION_STATUS_LABELS: Record<MissionStatus, string> = {
   interrupted: 'INTERRUMPIDA',
 };
 
+const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
+const AUDIO_EXT = /\.(mp3|wav|m4a|aac|ogg)$/i;
+const VIDEO_EXT = /\.(mp4|mov|webm)$/i;
+
+export const missionPhotoArtifacts = (m: ServerMission) => (m.artifacts ?? []).filter((a) => IMAGE_EXT.test(a));
+export const missionAudioArtifacts = (m: ServerMission) => (m.artifacts ?? []).filter((a) => AUDIO_EXT.test(a));
+export const missionVideoArtifacts = (m: ServerMission) => (m.artifacts ?? []).filter((a) => VIDEO_EXT.test(a));
+
+// There is no event-log endpoint yet: this is built only from real,
+// already-available fields (never invented data like "persona detectada").
+export interface MissionEvent {
+  offsetS: number;
+  label: string;
+}
+const STREAM_LABEL: Record<string, string> = { camera: 'Cámara', thermal: 'Térmica', lidar: 'LiDAR' };
+export function buildMissionTimeline(m: ServerMission): MissionEvent[] {
+  const events: MissionEvent[] = [{ offsetS: 0, label: 'Inicio de misión' }];
+  Object.entries(m.streams ?? {}).forEach(([key, stat]) => {
+    if (stat?.first_at_s != null) {
+      events.push({ offsetS: stat.first_at_s, label: `${STREAM_LABEL[key] ?? key}: primer cuadro` });
+    }
+  });
+  if (missionIsReady(m)) {
+    events.push({
+      offsetS: m.duration_s,
+      label: m.status === 'error' || m.status === 'interrupted'
+        ? `Misión interrumpida${m.error ? ' — ' + m.error : ''}`
+        : 'Fin de misión',
+    });
+  }
+  return events.sort((a, b) => a.offsetS - b.offsetS);
+}
+
 export function formatMissionTime(totalSeconds: number) {
   const s = Math.max(0, Math.floor(totalSeconds));
   const h = Math.floor(s / 3600);
