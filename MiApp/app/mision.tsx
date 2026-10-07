@@ -18,22 +18,25 @@ import { C, formatClock, levelColor } from '../styles/theme';
 import { d } from '../utils/scale';
 import { useAppSettings } from '../contexts/AppSettings';
 import { useDeviceBattery } from '../utils/device';
-import Icon, { IconName, WifiIcon } from '../components/Icons';
+import Icon, { CustomIcon, hasCustomIcon, IconName, WifiIcon } from '../components/Icons';
 import LidarReconstruction, { LidarSink, LidarSinkFrame } from '../components/LidarReconstruction';
 import {
   DOG_API_URL,
   DOG_ROBOT_ID,
   DOG_TOKEN,
   emergencyStop,
+  batteryFromTelemetry,
   getRobotStatus,
   moveRobotAxes,
   RobotStatus,
 } from '../services/api';
-import { TalkClient, TalkStatusMessage } from '../services/go2Talk';
+import { TalkClient, TalkSource, TalkStatusMessage } from '../services/go2Talk';
 import { configureDogMedia, DEFAULT_SPEED_PROFILES, NETWORK_PROFILES } from '../services/operator';
 import { stopServerMission } from '../services/missions';
 import {
+  ArducamFrameMeta,
   connectRobotWS,
+  registerArducamCanvas,
   registerThermalCanvas,
   registerVideoCanvas,
   sendConfirmedCommand,
@@ -62,6 +65,7 @@ const TOAST_MS = 1500;
 const PHOTO_HIGHLIGHT_MS = 2000;
 const FEED_LABEL_MS = 1500;
 const THERMAL_STALE_MS = 3000;
+const NIGHT_STALE_MS = 3000;
 const SWIPE_MIN_PX = 50;
 
 function clamp(value: number, min: number, max: number) {
@@ -82,6 +86,13 @@ function connectionScore(connected: boolean, lastDataAgeMs: number, rttMs: numbe
   else if (lastDataAgeMs > 2000) score = Math.min(score, 55);
   return score;
 }
+
+// Bar icons uploaded to assets/icons: "<name>-activo" while the button is on;
+// falls back to the built-in icon when the file isn't there.
+const BarIcon = ({ custom, fallback, active = false, size }: { custom: string; fallback: IconName; active?: boolean; size: number }) => {
+  const name = active && hasCustomIcon(`${custom}-activo`) ? `${custom}-activo` : custom;
+  return hasCustomIcon(name) ? <CustomIcon name={name} size={size} /> : <Icon name={fallback} size={size} />;
+};
 
 // ── Feeds ───────────────────────────────────────────────────────────────────
 
@@ -125,6 +136,28 @@ const ThermalFeed = ({ meta, stale, hasFrames }: { meta: ThermalFrameMeta | null
       {(!hasFrames || stale) && <Text style={styles.feedEmptyText}>{hasFrames ? 'SEÑAL INTERRUMPIDA' : 'SIN SEÑAL'}</Text>}
       {hasFrames && !stale && (
         <Text style={styles.thermalReadout}>mín {fmt(t?.min_c)} · máx {fmt(t?.max_c)} · centro {fmt(t?.center_c)}</Text>
+      )}
+    </View>
+  );
+};
+
+// Arducam B0541 (Raspberry CSI). The server sends no cached frame on connect,
+// so the view waits for the next new one.
+const NightFeed = ({ meta, stale, hasFrames }: { meta: ArducamFrameMeta | null; stale: boolean; hasFrames: boolean }) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !canvasRef.current) return;
+    return registerArducamCanvas(canvasRef.current);
+  }, []);
+  return (
+    <View style={styles.feed}>
+      {Platform.OS === 'web' && React.createElement('canvas', {
+        ref: canvasRef,
+        style: { width: '100%', height: '100%', objectFit: 'contain', display: 'block', opacity: stale ? 0.35 : 1 },
+      })}
+      {(!hasFrames || stale) && <Text style={styles.feedEmptyText}>{hasFrames ? 'SEÑAL INTERRUMPIDA' : 'ESPERANDO CÁMARA'}</Text>}
+      {hasFrames && !stale && meta?.width && meta?.height && (
+        <Text style={styles.thermalReadout}>{meta.width}×{meta.height}</Text>
       )}
     </View>
   );
@@ -297,17 +330,18 @@ export default function MisionScreen() {
   const [cameraHasFrames, setCameraHasFrames] = useState(false);
   const [thermalMeta, setThermalMeta] = useState<ThermalFrameMeta | null>(null);
   const [thermalLastAt, setThermalLastAt] = useState(0);
+  const [nightMeta, setNightMeta] = useState<ArducamFrameMeta | null>(null);
+  const [nightLastAt, setNightLastAt] = useState(0);
   const [lidarData, setLidarData] = useState<{ points: Float32Array; count: number } | null>(null);
   const [telemetry, setTelemetry] = useState<Record<string, any> | null>(null);
   const [robotStatus, setRobotStatus] = useState<RobotStatus | null>(null);
   const [rttMs, setRttMs] = useState<number | null>(null);
 
-  const [talking, setTalking] = useState(false);
+  // Mic and siren share the Go2 speaker (one turn at a time): which one is on.
+  const [talkSource, setTalkSource] = useState<TalkSource | null>(null);
   const [talkRemaining, setTalkRemaining] = useState<number | null>(null);
   const [flashlight, setFlashlight] = useState(false);
   const [flashlightPending, setFlashlightPending] = useState(false);
-  const [safetyEnabled, setSafetyEnabled] = useState(false);
-  const [safetyPending, setSafetyPending] = useState(false);
   const [photoActive, setPhotoActive] = useState(false);
   const [recordingSince, setRecordingSince] = useState<number | null>(null);
   const [postureOpen, setPostureOpen] = useState(false);
@@ -322,9 +356,9 @@ export default function MisionScreen() {
   const lastTelemetryUiRef = useRef(0);
   const lastLidarUiRef = useRef(0);
   const lastThermalUiRef = useRef(0);
+  const lastNightUiRef = useRef(0);
   const lastFrameAtRef = useRef(0);
   const flashlightPendingRef = useRef(false);
-  const safetyPendingRef = useRef(false);
   const talkClientRef = useRef<TalkClient | null>(null);
   const keyStateRef = useRef<Set<string>>(new Set());
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -345,16 +379,16 @@ export default function MisionScreen() {
   useEffect(() => {
     const client = new TalkClient((message: TalkStatusMessage) => {
       if (message.status === 'opening') {
-        setTalking(true);
+        setTalkSource(client.currentSource);
         setTalkRemaining(null);
       } else if (message.status === 'talking') {
-        setTalking(true);
+        setTalkSource(client.currentSource);
         setTalkRemaining(message.remaining);
       } else if (message.status === 'stopped') {
-        setTalking(false);
+        setTalkSource(null);
         setTalkRemaining(null);
       } else {
-        setTalking(false);
+        setTalkSource(null);
         setTalkRemaining(null);
         showToast(message.error, false);
       }
@@ -479,10 +513,6 @@ export default function MisionScreen() {
           const brightness = record?.flashlight?.brightness;
           if (brightness != null) setFlashlight(Number(brightness) > 0);
         }
-        if (!safetyPendingRef.current) {
-          const enabled = record?.safety?.enabled;
-          if (enabled != null) setSafetyEnabled(!!enabled);
-        }
         if (t - lastTelemetryUiRef.current < 500) return;
         lastTelemetryUiRef.current = t;
         setTelemetry(record);
@@ -510,6 +540,13 @@ export default function MisionScreen() {
         lastThermalUiRef.current = t;
         setThermalMeta(meta);
         setThermalLastAt(t);
+      },
+      onArducam: (meta) => {
+        const t = Date.now();
+        if (t - lastNightUiRef.current < 300) return;
+        lastNightUiRef.current = t;
+        setNightMeta(meta);
+        setNightLastAt(t);
       },
     });
     return disconnect;
@@ -613,17 +650,20 @@ export default function MisionScreen() {
   }, [robotSpeed]);
 
   // ── Action bar ──
-  const toggleTalk = async () => {
+  // Pressing the source that is on stops it; pressing the other one switches.
+  const toggleSpeaker = async (source: TalkSource) => {
     const client = talkClientRef.current;
     if (!client) return;
     if (client.active) {
+      const same = client.currentSource === source;
       client.stop();
-      return;
+      if (same) return;
     }
     try {
-      await client.start({ apiBase: DOG_API_URL, token: DOG_TOKEN, robotId: DOG_ROBOT_ID });
+      await client.start({ apiBase: DOG_API_URL, token: DOG_TOKEN, robotId: DOG_ROBOT_ID }, source);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'No se pudo abrir el micrófono', false);
+      const fallback = source === 'siren' ? 'No se pudo activar la sirena' : 'No se pudo abrir el micrófono';
+      showToast(err instanceof Error ? err.message : fallback, false);
     }
   };
 
@@ -642,24 +682,6 @@ export default function MisionScreen() {
     } finally {
       flashlightPendingRef.current = false;
       setFlashlightPending(false);
-    }
-  };
-
-  const toggleSafety = async () => {
-    if (safetyPendingRef.current) return;
-    safetyPendingRef.current = true;
-    setSafetyPending(true);
-    const next = !safetyEnabled;
-    try {
-      const result = await sendConfirmedCommand('set_safety', { enabled: next });
-      const enabled = !!result.safety_enabled;
-      setSafetyEnabled(enabled);
-      showToast(enabled ? 'Antichoque activado' : 'Antichoque desactivado');
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'No se pudo cambiar el antichoque', false);
-    } finally {
-      safetyPendingRef.current = false;
-      setSafetyPending(false);
     }
   };
 
@@ -764,52 +786,52 @@ export default function MisionScreen() {
   };
 
   // ── Status bar values ──
-  const robotBattery = (() => {
-    // null/undefined must stay unknown (Number(null) would read as 0%).
-    const raw = telemetry?.battery;
-    const fromTelemetry = raw == null || raw === '' ? NaN : Number(raw);
-    if (Number.isFinite(fromTelemetry)) return fromTelemetry;
-    return robotStatus?.battery ?? null;
-  })();
+  // Live telemetry first, then the last value the robot server kept (/state).
+  const robotBattery = batteryFromTelemetry(telemetry) ?? robotStatus?.battery ?? null;
   const connScore = connectionScore(mediaConnected, lastDataAtRef.current ? now - lastDataAtRef.current : Infinity, rttMs);
   const connLevel: 1 | 2 | 3 = connScore >= 65 ? 3 : connScore >= 35 ? 2 : 1;
   const thermalStale = thermalLastAt > 0 && now - thermalLastAt > THERMAL_STALE_MS;
+  const nightStale = nightLastAt > 0 && now - nightLastAt > NIGHT_STALE_MS;
   const missionSeconds = (now - startedAt) / 1000;
 
-  const actions: { key: string; label: string; icon: IconName; active: boolean; chip?: string; onPress: () => void }[] = [
+  const actions: { key: string; label: string; icon: IconName; custom: string; active: boolean; chip?: string; onPress: () => void }[] = [
     {
       key: 'hablar',
       label: 'Hablar',
       icon: 'mic',
-      active: talking,
+      custom: 'hablar',
+      active: talkSource === 'mic',
       chip: talkRemaining != null ? `Transmitiendo: ${talkRemaining}s` : 'Abriendo micrófono…',
-      onPress: toggleTalk,
+      onPress: () => toggleSpeaker('mic'),
     },
     {
-      key: 'antichoque',
-      label: 'Antichoque',
-      icon: 'shield',
-      active: safetyEnabled || safetyPending,
-      chip: safetyPending ? 'Esperando confirmación' : 'Antichoque activado',
-      onPress: toggleSafety,
+      key: 'sirena',
+      label: 'Sirena',
+      icon: 'siren',
+      custom: 'sirena',
+      active: talkSource === 'siren',
+      chip: talkRemaining != null ? `Sirena: ${talkRemaining}s` : 'Activando sirena…',
+      onPress: () => toggleSpeaker('siren'),
     },
     {
       key: 'linterna',
       label: 'Linterna',
       icon: 'flashlight',
+      custom: 'linterna',
       active: flashlight || flashlightPending,
       chip: flashlightPending ? 'Esperando confirmación' : 'Linterna encendida',
       onPress: toggleLight,
     },
-    { key: 'foto', label: 'Foto', icon: 'camera', active: photoActive, onPress: takePhoto },
+    { key: 'foto', label: 'Foto', icon: 'camera', custom: 'foto', active: photoActive, onPress: takePhoto },
     {
       key: 'grabar',
       label: recordingSince ? 'Detener' : 'Grabar',
       icon: recordingSince ? 'stop' : 'record',
+      custom: recordingSince ? 'detener' : 'grabar',
       active: !!recordingSince,
       onPress: () => (recordingSince ? stopRecording() : startRecording()),
     },
-    { key: 'postura', label: 'Postura', icon: 'paw', active: postureOpen, onPress: () => setPostureOpen((v) => !v) },
+    { key: 'postura', label: 'Postura', icon: 'paw', custom: 'postura', active: postureOpen, onPress: () => setPostureOpen((v) => !v) },
   ];
 
   const feed = FEEDS[feedIndex];
@@ -825,7 +847,7 @@ export default function MisionScreen() {
             {f.key === 'lidar' && (Platform.OS === 'web'
               ? <LidarReconstruction sinkRef={lidarSinkRef} />
               : <LidarMapView points={lidarData?.points ?? null} count={lidarData?.count ?? 0} />)}
-            {f.key === 'night' && <View style={styles.feed}><Text style={styles.feedEmptyText}>SIN SEÑAL</Text></View>}
+            {f.key === 'night' && <NightFeed meta={nightMeta} stale={nightStale} hasFrames={nightLastAt > 0} />}
           </View>
         ))}
       </View>
@@ -891,7 +913,7 @@ export default function MisionScreen() {
                 style={[styles.postureOption, posture === value && styles.actionButtonActive]}
                 onPress={() => choosePosture(value)}
               >
-                <Icon name={value === 'parado' ? 'dogStanding' : 'dogLying'} size={d(30)} />
+                <BarIcon custom={value} fallback={value === 'parado' ? 'dogStanding' : 'dogLying'} size={d(30)} />
                 <Text style={styles.actionLabel}>{value === 'parado' ? 'Parado' : 'Agachado'}</Text>
               </TouchableOpacity>
             ))}
@@ -908,7 +930,7 @@ export default function MisionScreen() {
               style={[styles.actionButton, a.active && styles.actionButtonActive]}
               onPress={a.onPress}
             >
-              <Icon name={a.icon} size={d(22)} />
+              <BarIcon custom={a.custom} fallback={a.icon} active={a.active} size={d(22)} />
               <Text style={styles.actionLabel}>{a.label}</Text>
             </TouchableOpacity>
           ))}

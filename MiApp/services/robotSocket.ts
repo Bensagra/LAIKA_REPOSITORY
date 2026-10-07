@@ -35,6 +35,19 @@ export type ThermalFrameMeta = {
   };
 };
 export type ThermalCallback = (meta: ThermalFrameMeta) => void;
+// Arducam B0541 on the Raspberry ("Arducam en el frontend"): JPEG frames whose
+// size changes live with the available bandwidth.
+export type ArducamFrameMeta = {
+  seq?: number;
+  session_id?: string;
+  ts?: number;
+  server_received_ts?: number;
+  width?: number;
+  height?: number;
+  source_width?: number;
+  source_height?: number;
+};
+export type ArducamCallback = (meta: ArducamFrameMeta) => void;
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -53,6 +66,7 @@ let cbCommandAck: CommandAckCallback | null = null;
 let cbAudio: AudioCallback | null = null;
 let cbNetBytes: NetBytesCallback | null = null;
 let cbThermal: ThermalCallback | null = null;
+let cbArducam: ArducamCallback | null = null;
 
 // Confirmed commands (linterna/antichoque): resolved from the command_ack
 // that arrives on this same /ws/live connection, matched by command_id.
@@ -103,6 +117,7 @@ function uint8ToBase64(bytes: Uint8Array): string {
 
 const videoCanvases = new Set<HTMLCanvasElement>();
 const thermalCanvases = new Set<HTMLCanvasElement>();
+const arducamCanvases = new Set<HTMLCanvasElement>();
 
 export function registerVideoCanvas(canvas: HTMLCanvasElement): () => void {
   videoCanvases.add(canvas);
@@ -112,6 +127,11 @@ export function registerVideoCanvas(canvas: HTMLCanvasElement): () => void {
 export function registerThermalCanvas(canvas: HTMLCanvasElement): () => void {
   thermalCanvases.add(canvas);
   return () => { thermalCanvases.delete(canvas); };
+}
+
+export function registerArducamCanvas(canvas: HTMLCanvasElement): () => void {
+  arducamCanvases.add(canvas);
+  return () => { arducamCanvases.delete(canvas); };
 }
 
 export function webCodecsAvailable(): boolean {
@@ -227,18 +247,20 @@ function decodeH264(header: Record<string, unknown>, bytes: Uint8Array, encodedA
 
 // One-frame queue per image stream: while a frame decodes, only the newest
 // incoming frame is kept, so latency never builds up and nothing stale is drawn.
-interface ImageJob { bytes: Uint8Array; mime: string; onDrawn?: () => void }
+interface ImageJob { bytes: Uint8Array; mime: string; onDrawn?: () => void; receivedAt: number; maxAgeMs?: number }
 interface ImageQueue { canvases: Set<HTMLCanvasElement>; busy: boolean; pending: ImageJob | null; gen: number }
 
 const videoQueue: ImageQueue = { canvases: videoCanvases, busy: false, pending: null, gen: 0 };
 const thermalQueue: ImageQueue = { canvases: thermalCanvases, busy: false, pending: null, gen: 0 };
+const arducamQueue: ImageQueue = { canvases: arducamCanvases, busy: false, pending: null, gen: 0 };
 
 function runImageJob(queue: ImageQueue, job: ImageJob): void {
   queue.busy = true;
   const gen = queue.gen;
   createImageBitmap(new Blob([job.bytes as BlobPart], { type: job.mime }))
     .then((bmp) => {
-      if (gen === queue.gen) {
+      const late = job.maxAgeMs != null && Date.now() - job.receivedAt >= job.maxAgeMs;
+      if (gen === queue.gen && !late) {
         drawToCanvases(bmp, bmp.width, bmp.height, queue.canvases);
         job.onDrawn?.();
       }
@@ -254,9 +276,9 @@ function runImageJob(queue: ImageQueue, job: ImageJob): void {
 }
 
 /** Returns false when there is no canvas to draw into (e.g. native). */
-function enqueueImage(queue: ImageQueue, bytes: Uint8Array, mime: string, onDrawn?: () => void): boolean {
+function enqueueImage(queue: ImageQueue, bytes: Uint8Array, mime: string, onDrawn?: () => void, maxAgeMs?: number): boolean {
   if (queue.canvases.size === 0 || typeof createImageBitmap !== 'function') return false;
-  const job = { bytes: bytes.slice(0), mime, onDrawn };
+  const job = { bytes: bytes.slice(0), mime, onDrawn, receivedAt: Date.now(), maxAgeMs };
   if (queue.busy) queue.pending = job;
   else runImageJob(queue, job);
   return true;
@@ -264,7 +286,7 @@ function enqueueImage(queue: ImageQueue, bytes: Uint8Array, mime: string, onDraw
 
 // Drop queued frames on disconnect so nothing from the old session is drawn.
 function invalidateImageQueues(): void {
-  for (const queue of [videoQueue, thermalQueue]) {
+  for (const queue of [videoQueue, thermalQueue, arducamQueue]) {
     queue.gen++;
     queue.pending = null;
   }
@@ -369,6 +391,15 @@ function parseFrame(buffer: ArrayBuffer): void {
     const meta = header as ThermalFrameMeta;
     if (!enqueueImage(thermalQueue, payload, mimeFor(header.image_format), () => cbThermal?.(meta))) {
       cbThermal?.(meta);
+    }
+    return;
+  }
+
+  if (stream === 'arducam') {
+    // Frames that take 3 s or more to decode are dropped, not drawn late.
+    const meta = header as ArducamFrameMeta;
+    if (!enqueueImage(arducamQueue, payload, mimeFor(header.image_format), () => cbArducam?.(meta), 3000)) {
+      cbArducam?.(meta);
     }
     return;
   }
@@ -521,6 +552,7 @@ export function connectRobotWS(opts: {
   onAudio?: AudioCallback;
   onNetBytes?: NetBytesCallback;
   onThermal?: ThermalCallback;
+  onArducam?: ArducamCallback;
 }): () => void {
   const gen = ++currentGen;
   cbVideo = opts.onVideoFrame ?? null;
@@ -536,6 +568,7 @@ export function connectRobotWS(opts: {
   cbAudio = opts.onAudio ?? null;
   cbNetBytes = opts.onNetBytes ?? null;
   cbThermal = opts.onThermal ?? null;
+  cbArducam = opts.onArducam ?? null;
 
   doConnect(gen);
 
@@ -559,6 +592,7 @@ export function connectRobotWS(opts: {
     cbAudio = null;
     cbNetBytes = null;
     cbThermal = null;
+    cbArducam = null;
   };
 }
 

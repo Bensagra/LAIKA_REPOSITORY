@@ -11,7 +11,8 @@
     "web:noexpo": "vite --host 127.0.0.1 --port 8081",
     "build": "vite build",
     "web:prod": "vite build && vite preview --host 127.0.0.1 --port 8081",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "icons": "node ./scripts/build-icons.js"
   },
   "dependencies": {
     "@expo-google-fonts/viga": "^0.4.1",

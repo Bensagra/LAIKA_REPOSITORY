@@ -117,12 +117,13 @@ export default function PrepararScreen() {
     };
     const mark = (stream: string) => {
       seen.add(stream);
-      if (seen.size >= 3) finishCameras(); // camera + thermal + LiDAR: all available sources
+      if (seen.size >= 4) finishCameras(); // camera + thermal + LiDAR + Arducam (nocturna)
     };
     const disconnect = connectRobotWS({
       onVideoFrame: () => mark('camera'),
       onVideoTick: () => mark('camera'),
       onThermal: () => mark('thermal'),
+      onArducam: () => mark('arducam'),
       onLidar: () => mark('lidar'),
     });
     const timer = setTimeout(finishCameras, CAMERA_WINDOW_MS);

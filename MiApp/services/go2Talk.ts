@@ -13,6 +13,9 @@ export type TalkStatusMessage =
 
 export type TalkStatusCallback = (message: TalkStatusMessage) => void;
 
+/** What goes to the Go2 speaker: the browser mic, or a siren made in the browser. */
+export type TalkSource = 'mic' | 'siren';
+
 export interface TalkConnection {
   apiBase?: string;
   token?: string;
@@ -89,7 +92,9 @@ export class TalkClient {
   private ws: WebSocket | null = null;
   private audioContext: AudioContext | null = null;
   private workletNode: AudioWorkletNode | null = null;
-  private sourceNode: MediaStreamAudioSourceNode | null = null;
+  private sourceNode: AudioNode | null = null;
+  private sirenNodes: OscillatorNode[] = [];
+  private source: TalkSource = 'mic';
   private silentGain: GainNode | null = null;
   private stream: MediaStream | null = null;
   private workletUrl: string | null = null;
@@ -122,12 +127,18 @@ export class TalkClient {
     return this.opening || !this.stopped;
   }
 
-  async start(connection: TalkConnection = {}): Promise<void> {
+  /** Which source the current (or last) turn uses. */
+  get currentSource(): TalkSource {
+    return this.source;
+  }
+
+  async start(connection: TalkConnection = {}, source: TalkSource = 'mic'): Promise<void> {
     if (Platform.OS !== 'web') {
-      throw new Error('El micrófono solo está disponible en la web');
+      throw new Error(source === 'siren' ? 'La sirena solo está disponible en la web' : 'El micrófono solo está disponible en la web');
     }
     if (this.active) return;
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    this.source = source;
+    if (source === 'mic' && (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia)) {
       throw new Error('Este navegador no permite acceder al micrófono');
     }
     const AudioContextCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -145,7 +156,7 @@ export class TalkClient {
 
     try {
       await this.openSocket(apiBase, token, robotId);
-      await this.openMicrophone(AudioContextCtor);
+      await this.openAudio(AudioContextCtor, source);
       this.attachGlobalListeners();
       this.startedAt = Date.now();
       this.opening = false;
@@ -154,7 +165,7 @@ export class TalkClient {
       this.sendTimer = setInterval(() => this.drainOneChunk(), CHUNK_SAMPLES / SAMPLE_RATE * 1000);
     } catch (err) {
       this.cleanup();
-      throw err instanceof Error ? err : new Error('No se pudo abrir el micrófono');
+      throw err instanceof Error ? err : new Error(source === 'siren' ? 'No se pudo activar la sirena' : 'No se pudo abrir el micrófono');
     }
   }
 
@@ -245,10 +256,12 @@ export class TalkClient {
     });
   }
 
-  private async openMicrophone(AudioContextCtor: any): Promise<void> {
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-    });
+  private async openAudio(AudioContextCtor: any, source: TalkSource): Promise<void> {
+    if (source === 'mic') {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      });
+    }
     const audioContext: AudioContext = new AudioContextCtor();
     this.audioContext = audioContext;
 
@@ -260,7 +273,7 @@ export class TalkClient {
     this.workletNode = workletNode;
     workletNode.port.onmessage = (event) => this.enqueueChunk(event.data as ArrayBuffer);
 
-    const sourceNode = audioContext.createMediaStreamSource(this.stream);
+    const sourceNode = source === 'siren' ? this.createSiren(audioContext) : audioContext.createMediaStreamSource(this.stream!);
     this.sourceNode = sourceNode;
     sourceNode.connect(workletNode);
 
@@ -276,6 +289,32 @@ export class TalkClient {
     if (audioContext.state === 'suspended') {
       await audioContext.resume().catch(() => {});
     }
+  }
+
+  // Wailing siren: a sawtooth swept 650–1550 Hz by a slow triangle LFO,
+  // low-passed so the robot speaker doesn't distort.
+  private createSiren(audioContext: AudioContext): AudioNode {
+    const tone = audioContext.createOscillator();
+    tone.type = 'sawtooth';
+    tone.frequency.value = 1100;
+    const sweep = audioContext.createOscillator();
+    sweep.type = 'triangle';
+    sweep.frequency.value = 0.7;
+    const sweepDepth = audioContext.createGain();
+    sweepDepth.gain.value = 450;
+    sweep.connect(sweepDepth);
+    sweepDepth.connect(tone.frequency);
+    const filter = audioContext.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 3200;
+    const level = audioContext.createGain();
+    level.gain.value = 0.55;
+    tone.connect(filter);
+    filter.connect(level);
+    tone.start();
+    sweep.start();
+    this.sirenNodes = [tone, sweep];
+    return level;
   }
 
   private enqueueChunk(buffer: ArrayBuffer) {
@@ -331,6 +370,8 @@ export class TalkClient {
       try { this.sourceNode.disconnect(); } catch {}
       this.sourceNode = null;
     }
+    this.sirenNodes.forEach((node) => { try { node.stop(); node.disconnect(); } catch {} });
+    this.sirenNodes = [];
     if (this.workletNode) {
       this.workletNode.port.onmessage = null;
       try { this.workletNode.disconnect(); } catch {}

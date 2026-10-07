@@ -1,5 +1,6 @@
 import React from 'react';
-import Svg, { Circle, Ellipse, Line, Path, Polyline, Rect } from 'react-native-svg';
+import Svg, { Circle, Ellipse, Line, Path, Polygon, Polyline, Rect } from 'react-native-svg';
+import { CUSTOM_ICONS } from './customIcons';
 
 // Line icons for the LAIKA design (24x24 grid, drawn as SVG so they render the
 // same on web and native; the web build has no icon font).
@@ -283,6 +284,29 @@ export function WifiIcon({ size = 24, color, level, muted = '#9a8b8b' }: { size?
       <Path d="M3 9.5a13 13 0 0 1 18 0" {...arc(level >= 3)} />
       <Path d="M6.5 13a8 8 0 0 1 11 0" {...arc(level >= 2)} />
       <Circle cx={12} cy={17.5} r={1.9} fill={color} />
+    </Svg>
+  );
+}
+
+const CUSTOM_TAGS = { path: Path, rect: Rect, circle: Circle, ellipse: Ellipse, line: Line, polyline: Polyline, polygon: Polygon } as const;
+
+export function hasCustomIcon(name: string): boolean {
+  return name in CUSTOM_ICONS;
+}
+
+// Icons uploaded to assets/icons (see scripts/build-icons.js). Keeps the
+// file's own proportions inside a size x size box, so nothing gets stretched.
+export function CustomIcon({ name, size = 24, color = '#F8E3E3' }: { name: string; size?: number; color?: string }) {
+  const icon = CUSTOM_ICONS[name];
+  if (!icon) return null;
+  return (
+    <Svg width={size} height={size} viewBox={icon.viewBox}>
+      {icon.elements.map((el, i) => {
+        const Tag = CUSTOM_TAGS[el.tag] as React.ComponentType<any>;
+        const attrs: Record<string, string> = {};
+        for (const [k, v] of Object.entries(el.attrs)) attrs[k] = v === 'currentColor' ? color : v;
+        return <Tag key={i} {...attrs} />;
+      })}
     </Svg>
   );
 }

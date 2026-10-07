@@ -92,6 +92,35 @@ export async function requestMissionDownload(id: string, filename: string): Prom
   return missionFileUrl(data.path);
 }
 
+export type MissionMediaKind = 'photo' | 'video' | 'audio';
+
+export interface UploadedMissionMedia {
+  filename: string;
+  kind: MissionMediaKind;
+  size_bytes?: number;
+  mission_time_s?: number;
+}
+
+/**
+ * Saves a photo, video clip or voice recording taken during the mission into
+ * that mission on the server (POST /api/missions/{id}/media, multipart).
+ * The filename prefix (foto-/video-/audio-) is what the gallery sorts by.
+ */
+export function uploadMissionMedia(
+  id: string,
+  kind: MissionMediaKind,
+  file: Blob,
+  info: { filename: string; capturedAtMs: number; durationMs?: number; source?: string },
+): Promise<UploadedMissionMedia> {
+  const form = new FormData();
+  form.append('kind', kind);
+  form.append('captured_at', String(info.capturedAtMs / 1000));
+  if (info.durationMs != null) form.append('duration_s', String(info.durationMs / 1000));
+  if (info.source) form.append('source', info.source);
+  form.append('file', file, info.filename);
+  return fetchDogJson<UploadedMissionMedia>(`${missionPath(id)}/media`, { method: 'POST', body: form }, LONG_TIMEOUT_MS);
+}
+
 // Descriptions from the "Qué queda guardado" table.
 export const MISSION_FILE_LABELS: Record<string, string> = {
   'camera.mp4': 'Video de la cámara (H.264)',
@@ -116,9 +145,12 @@ const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
 const AUDIO_EXT = /\.(mp3|wav|m4a|aac|ogg)$/i;
 const VIDEO_EXT = /\.(mp4|mov|webm)$/i;
 
+// Voice recordings come as .webm/.ogg too, so the "audio-" prefix decides first.
+const isAudio = (a: string) => /(^|\/)audio-/i.test(a) || AUDIO_EXT.test(a);
+
 export const missionPhotoArtifacts = (m: ServerMission) => (m.artifacts ?? []).filter((a) => IMAGE_EXT.test(a));
-export const missionAudioArtifacts = (m: ServerMission) => (m.artifacts ?? []).filter((a) => AUDIO_EXT.test(a));
-export const missionVideoArtifacts = (m: ServerMission) => (m.artifacts ?? []).filter((a) => VIDEO_EXT.test(a));
+export const missionAudioArtifacts = (m: ServerMission) => (m.artifacts ?? []).filter(isAudio);
+export const missionVideoArtifacts = (m: ServerMission) => (m.artifacts ?? []).filter((a) => VIDEO_EXT.test(a) && !isAudio(a));
 
 // There is no event-log endpoint yet: this is built only from real,
 // already-available fields (never invented data like "persona detectada").
