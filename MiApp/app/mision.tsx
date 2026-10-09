@@ -346,6 +346,7 @@ export default function MisionScreen() {
   const [recordingSince, setRecordingSince] = useState<number | null>(null);
   const [postureOpen, setPostureOpen] = useState(false);
   const [posture, setPosture] = useState<Posture | null>(null);
+  const postureCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
   const [exitVisible, setExitVisible] = useState(false);
   const [finishing, setFinishing] = useState(false);
@@ -367,6 +368,10 @@ export default function MisionScreen() {
   const feedLabelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const feedIndexRef = useRef(0);
   feedIndexRef.current = feedIndex;
+
+  useEffect(() => () => {
+    if (postureCloseTimerRef.current) clearTimeout(postureCloseTimerRef.current);
+  }, []);
 
   const showToast = useCallback((text: string, ok = true) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -765,8 +770,12 @@ export default function MisionScreen() {
 
   const choosePosture = (value: Posture) => {
     // Visual only for now: no robot command for stand/lie down yet.
+    if (postureCloseTimerRef.current) clearTimeout(postureCloseTimerRef.current);
     setPosture(value);
-    setPostureOpen(false);
+    postureCloseTimerRef.current = setTimeout(() => {
+      setPostureOpen(false);
+      postureCloseTimerRef.current = null;
+    }, 500);
   };
 
   const finishMission = async () => {
@@ -913,7 +922,7 @@ export default function MisionScreen() {
                 style={[styles.postureOption, posture === value && styles.actionButtonActive]}
                 onPress={() => choosePosture(value)}
               >
-                <BarIcon custom={value} fallback={value === 'parado' ? 'dogStanding' : 'dogLying'} size={d(30)} />
+                <BarIcon custom={value} fallback={value === 'parado' ? 'dogStanding' : 'dogLying'} active={posture === value} size={d(30)} />
                 <Text style={styles.actionLabel}>{value === 'parado' ? 'Parado' : 'Agachado'}</Text>
               </TouchableOpacity>
             ))}
