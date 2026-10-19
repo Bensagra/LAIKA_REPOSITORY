@@ -15,6 +15,7 @@ export default function RootLayout() {
           <Stack.Screen name="preparar" />
           <Stack.Screen name="mision" />
           <Stack.Screen name="data" />
+          <Stack.Screen name="mision-detalle" />
         </Stack>
       </AppSettingsProvider>
     </GestureHandlerRootView>

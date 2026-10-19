@@ -147,16 +147,48 @@ export async function configureDogVisualStreams(cameraEnabled = true, lidarEnabl
   }, 2000);
 }
 
+function toPercent(value: unknown): number | null {
+  if (value == null || value === '' || typeof value === 'boolean') return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
+}
+
+/**
+ * Robot battery % from a telemetry record, or null when it isn't there. The
+ * Go2 reports it as bms_state.soc (lowstate); the gateway may flatten it.
+ * No made-up default: an unknown battery must not show up as a healthy one.
+ */
+export function batteryFromTelemetry(t: unknown): number | null {
+  if (!t || typeof t !== 'object') return null;
+  const r = t as Record<string, any>;
+  const battery = r.battery;
+  const candidates = [
+    typeof battery === 'object' && battery
+      ? battery.percent ?? battery.percentage ?? battery.soc ?? battery.level
+      : battery,
+    r.battery_percent, r.battery_percentage, r.battery_level, r.battery_soc, r.soc,
+    r.bms_state?.soc, r.bms?.soc,
+    r.lowstate?.bms_state?.soc, r.low_state?.bms_state?.soc,
+    r.robot?.battery, r.go2?.battery,
+  ];
+  for (const c of candidates) {
+    const p = toPercent(c);
+    if (p != null) return p;
+  }
+  return null;
+}
+
 export async function getRobotStatus(): Promise<RobotStatus> {
-  const res = await fetchDog(`/api/robots/${DOG_ROBOT_ID}/capabilities`, {
-    headers: { Authorization: `Bearer ${DOG_TOKEN}` },
-  });
-  const json = await res.json().catch(() => ({}));
-  // No made-up default: an unknown battery must not show up as a healthy one.
-  const battery = Number(json?.telemetry?.battery ?? json?.battery);
+  const headers = { Authorization: `Bearer ${DOG_TOKEN}` };
+  // /state carries the latest telemetry the Raspberry sent over MQTT.
+  // capabilities failing means the robot is unreachable (callers rely on the throw).
+  const [caps, state] = await Promise.all([
+    fetchDog(`/api/robots/${DOG_ROBOT_ID}/capabilities`, { headers }).then((r) => r.json().catch(() => ({}))),
+    fetchDog(`/api/robots/${DOG_ROBOT_ID}/state`, { headers }).then((r) => r.json()).catch(() => ({})),
+  ]);
   return {
-    battery: Number.isFinite(battery) ? battery : null,
-    speed: Number(json?.limits?.max_linear_speed ?? 0),
+    battery: batteryFromTelemetry(state?.telemetry) ?? batteryFromTelemetry(caps?.telemetry) ?? toPercent(caps?.battery),
+    speed: Number(caps?.limits?.max_linear_speed ?? 0),
     status: 'connected',
   };
 }

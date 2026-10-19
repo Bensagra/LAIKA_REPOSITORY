@@ -13,7 +13,8 @@ import {
 import { useRouter } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getRobotStatus, loginUser, registerUser, setBackendHost, RobotStatus } from '../services/api';
+import { getRobotStatus, setBackendHost, RobotStatus } from '../services/api';
+import { supabase } from '../services/supabase';
 import { useAppSettings } from '../contexts/AppSettings';
 import Icon from '../components/Icons';
 import { styles, SETTINGS_PANEL_W } from '../styles/index';
@@ -76,6 +77,27 @@ export default function HomeScreen() {
     AsyncStorage.getItem(BACKEND_IP_KEY).then((saved) => { if (saved) setBackendHost(saved); }).catch(() => {});
   }, []);
 
+ useEffect(() => {
+  let activo = true;
+
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    if (activo) {
+      setLoggedUser(session?.user.email?.split('@')[0] ?? null);
+    }
+  });
+
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((_evento, session) => {
+    setLoggedUser(session?.user.email?.split('@')[0] ?? null);
+  });
+
+  return () => {
+    activo = false;
+    subscription.unsubscribe();
+  };
+}, [setLoggedUser]);
+
   useEffect(() => {
     let alive = true;
     const poll = () => getRobotStatus()
@@ -96,16 +118,71 @@ export default function HomeScreen() {
       ? `Conectado | ${robot?.battery != null ? `${Math.round(robot.battery)}%` : '—'}`
       : 'Sin conexión';
 
-  const login = () => {
-    loginUser(email, password)
-      .then(() => { setLoggedUser(email.split('@')[0]); setAuthVisible(false); })
-      .catch((e: Error) => Alert.alert('Login', e.message));
-  };
-  const register = () => {
-    registerUser(email, password)
-      .then(() => { setAuthVisible(false); Alert.alert('Registro', 'Usuario creado'); })
-      .catch((e: Error) => Alert.alert('Registro', e.message));
-  };
+const mostrarAviso = (titulo: string, mensaje: string) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${titulo}\n\n${mensaje}`);
+    return;
+  }
+
+  Alert.alert(titulo, mensaje);
+};
+ const login = async () => {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: email.trim(),
+    password,
+  });
+
+  if (error) {
+  const detalle = error.message.toLowerCase();
+
+  const mensaje = detalle.includes('invalid login credentials')
+    ? 'El correo o la contraseña son incorrectos. Revisalos e intentá de nuevo.'
+    : detalle.includes('email not confirmed')
+      ? 'Primero confirmá tu correo desde el enlace que te enviamos.'
+      : 'No pudimos iniciar sesión. Revisá tu conexión e intentá de nuevo.';
+
+  mostrarAviso('No se pudo iniciar sesión', mensaje);
+  return;
+}
+
+  setLoggedUser(data.user.email?.split('@')[0] ?? email.trim());
+  setPassword('');
+  setAuthVisible(false);
+};
+
+const register = async () => {
+  const { data, error } = await supabase.auth.signUp({
+    email: email.trim(),
+    password,
+  });
+
+ if (error) {
+  const detalle = error.message.toLowerCase();
+
+  const mensaje = detalle.includes('already registered')
+    ? 'Ya existe una cuenta con ese correo. Iniciá sesión o probá con otro.'
+    : detalle.includes('password')
+      ? 'La contraseña no cumple los requisitos. Probá con una de al menos 6 caracteres.'
+      : detalle.includes('email')
+        ? 'Revisá que el correo esté escrito correctamente.'
+        : 'No pudimos crear la cuenta. Revisá tu conexión e intentá de nuevo.';
+
+  mostrarAviso('No se pudo completar el registro', mensaje);
+  return;
+}
+
+  setPassword('');
+  setAuthVisible(false);
+
+ if (data.session) {
+  mostrarAviso('¡Cuenta creada!', 'Ya podés iniciar sesión.');
+} else {
+  mostrarAviso(
+    'Confirmá tu correo',
+    `Te enviamos un enlace a ${email.trim()}. Abrilo y luego volvé a la app para iniciar sesión.`
+  );
+}
+}
 
   return (
     <View style={styles.window}>
@@ -214,8 +291,17 @@ export default function HomeScreen() {
                 <TouchableOpacity
                   activeOpacity={0.85}
                   style={[styles.secondaryButton, styles.modalButton]}
-                  onPress={() => { setLoggedUser(null); setAuthVisible(false); }}
-                >
+onPress={async () => {
+  const { error } = await supabase.auth.signOut();
+
+  if (error) {
+    Alert.alert('Cerrar sesión', error.message);
+    return;
+  }
+
+  setLoggedUser(null);
+  setAuthVisible(false);
+}}                >
                   <Text style={styles.modalButtonText}>Cerrar sesión</Text>
                 </TouchableOpacity>
               </>
