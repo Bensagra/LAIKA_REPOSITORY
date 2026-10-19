@@ -7,7 +7,10 @@ import path from 'node:path';
 // prefix, so each one used in app code (see services/api.ts) must be listed
 // here to be replaced with a literal at build time. Values come from
 // MiApp/.env(.local) locally, or from Vercel's Environment Variables in prod.
-const EXPO_PUBLIC_KEYS = ['EXPO_PUBLIC_DOG_API_URL', 'EXPO_PUBLIC_DOG_TOKEN', 'EXPO_PUBLIC_DOG_ROBOT_ID', 'EXPO_PUBLIC_BACKEND_HOST'];
+const EXPO_PUBLIC_KEYS = [
+  'EXPO_PUBLIC_DOG_API_URL', 'EXPO_PUBLIC_DOG_TOKEN', 'EXPO_PUBLIC_DOG_ROBOT_ID', 'EXPO_PUBLIC_BACKEND_HOST',
+  'EXPO_PUBLIC_SUPABASE_URL', 'EXPO_PUBLIC_SUPABASE_KEY',
+];
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
@@ -50,6 +53,10 @@ export default defineConfig(({ mode }) => {
         {
           find: 'react-native-svg',
           replacement: path.resolve(__dirname, 'web/shims/react-native-svg.tsx'),
+        },
+        {
+          find: 'expo-sqlite/localStorage/install',
+          replacement: path.resolve(__dirname, 'web/shims/expo-sqlite-localstorage-install.ts'),
         },
       ],
     },

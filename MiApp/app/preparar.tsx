@@ -49,6 +49,31 @@ function Spinner() {
   );
 }
 
+function PulseDots() {
+  const dots = useRef([new Animated.Value(1), new Animated.Value(1), new Animated.Value(1)]).current;
+
+  useEffect(() => {
+    const loops = dots.map((dot, index) => Animated.loop(
+      Animated.sequence([
+        Animated.delay(index * 180),
+        Animated.timing(dot, { toValue: 1.45, duration: 300, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(dot, { toValue: 1, duration: 300, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.delay(150),
+      ])
+    ));
+    loops.forEach((loop) => loop.start());
+    return () => loops.forEach((loop) => loop.stop());
+  }, [dots]);
+
+  return (
+    <View style={styles.pulseDots} accessibilityLabel="Verificando">
+      {dots.map((dot, index) => (
+        <Animated.View key={index} style={[styles.pulseDot, { transform: [{ scale: dot }] }]} />
+      ))}
+    </View>
+  );
+}
+
 function StatusIcon({ status }: { status: CheckState['status'] }) {
   if (status === 'pending') return <Spinner />;
   const bg = status === 'ok' ? C.green : status === 'fail' ? C.red : C.muted;
@@ -200,8 +225,9 @@ export default function PrepararScreen() {
         style={[styles.startButton, verifying && styles.startButtonBusy]}
       >
         <Text style={[styles.startText, verifying && styles.startTextBusy]}>
-          {verifying ? 'VERIFICANDO...' : starting ? 'INICIANDO...' : 'COMENZAR MISIÓN'}
+          {verifying ? 'VERIFICANDO' : starting ? 'INICIANDO...' : 'COMENZAR MISIÓN'}
         </Text>
+        {verifying && <PulseDots />}
         {!verifying && !starting && <Icon name="arrowRight" size={d(22)} strokeWidth={2.6} />}
       </TouchableOpacity>
     </View>
@@ -258,6 +284,8 @@ const styles = StyleSheet.create({
     gap: d(14),
   },
   startButtonBusy: { backgroundColor: C.muted },
+  pulseDots: { flexDirection: 'row', alignItems: 'center', gap: d(5), marginLeft: d(-5) },
+  pulseDot: { width: d(5), height: d(5), borderRadius: d(2.5), backgroundColor: C.textFaint },
   startText: { color: C.text, fontFamily: VIGA, fontSize: d(20), letterSpacing: 0.5 },
   startTextBusy: { color: C.textFaint },
 });
