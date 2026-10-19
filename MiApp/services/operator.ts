@@ -154,20 +154,28 @@ function authHeaders(json = false) {
 export async function fetchDog(path: string, options: RequestInit = {}, timeoutMs = 8000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const fullUrl = dogUrl(path);
+  const finalHeaders = {
+    ...authHeaders(typeof options.body === 'string'),
+    ...(options.headers ?? {}),
+  };
+  // TEMP DIAGNOSTIC — remove once the "missions" fetch mystery is solved.
+  console.log('[fetchDog] ->', fullUrl, finalHeaders);
   try {
-    const res = await fetch(dogUrl(path), {
+    const res = await fetch(fullUrl, {
       ...options,
       signal: controller.signal,
-      headers: {
-        ...authHeaders(typeof options.body === 'string'),
-        ...(options.headers ?? {}),
-      },
+      headers: finalHeaders,
     });
+    console.log('[fetchDog] <-', fullUrl, res.status);
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       throw new Error(`DOG API ${res.status}: ${text || res.statusText}`);
     }
     return res;
+  } catch (err) {
+    console.error('[fetchDog] EXCEPTION for', fullUrl, err);
+    throw err;
   } finally {
     clearTimeout(timeout);
   }
