@@ -5,13 +5,17 @@ import HomeScreen from '../app/index';
 import MisionScreen from '../app/mision';
 import DataScreen from '../app/data';
 import PrepararScreen from '../app/preparar';
+import MisionDetalleScreen from '../app/mision-detalle';
 import { AppSettingsProvider } from '../contexts/AppSettings';
 
 import './styles.css';
 
+const ROUTES = ['/mision', '/data', '/preparar', '/mision-detalle'];
+
 function getRoute() {
-  const route = window.location.hash.replace(/^#/, '');
-  return route === '/mision' || route === '/data' || route === '/preparar' ? route : '/';
+  const hash = window.location.hash.replace(/^#/, '');
+  const pathname = hash.split('?')[0];
+  return ROUTES.includes(pathname) ? pathname : '/';
 }
 
 function WebApp() {
@@ -30,6 +34,7 @@ function WebApp() {
   if (route === '/mision') return <MisionScreen />;
   if (route === '/data') return <DataScreen />;
   if (route === '/preparar') return <PrepararScreen />;
+  if (route === '/mision-detalle') return <MisionDetalleScreen />;
   return <HomeScreen />;
 }
 

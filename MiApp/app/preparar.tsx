@@ -3,6 +3,7 @@ import { Alert, Animated, Easing, ScrollView, StyleSheet, Text, TextInput, Touch
 import { useRouter } from 'expo-router';
 import { getRobotStatus } from '../services/api';
 import { listServerMissions, startServerMission } from '../services/missions';
+import { claimMission } from '../services/missionRecords';
 import { connectRobotWS } from '../services/robotSocket';
 import { useAppSettings } from '../contexts/AppSettings';
 import { hasMicAndSpeaker, readDeviceBattery } from '../utils/device';
@@ -169,6 +170,13 @@ export default function PrepararScreen() {
     const server = await startServerMission(name).catch(() => null);
     if (!server) {
       Alert.alert('Misión', 'No se pudo iniciar la grabación en el servidor: la misión va a continuar sin quedar guardada.');
+    } else {
+      // Best-effort: if this fails (offline, RLS, etc.) the mission still
+      // records on the robot, it just won't show up in "Misiones y datos"
+      // yet — logged loudly so that silent case is actually diagnosable.
+      await claimMission(server.mission_id).catch((err) => {
+        console.error('[claimMission] no se pudo asociar la misión a la cuenta', err);
+      });
     }
     setMisionActiva({
       nombre: server?.name ?? name,

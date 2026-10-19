@@ -9,7 +9,7 @@ import {
   getServerMission, missionFileUrl, openMissionPlayback,
   missionPhotoArtifacts, missionAudioArtifacts, formatMissionTime, buildMissionTimeline,
 } from '../services/missions';
-import { getMissionNotes, setMissionNotes } from '../services/missionLocal';
+import { getMissionNotes, setMissionNotes } from '../services/missionRecords';
 import Icon, { IconName } from '../components/Icons';
 import { C, HELV, VIGA } from '../styles/theme';
 import { d } from '../utils/scale';

@@ -12,9 +12,14 @@ const dUrl = () => `http://${_backendHost}:3001`;
 // Configurable via EXPO_PUBLIC_* env vars: MiApp/.env(.local) for local dev,
 // Vercel Project Settings > Environment Variables for the deployed build.
 // The literals below are only the dev fallback used when nothing is set.
-export const DOG_API_URL = process.env.EXPO_PUBLIC_DOG_API_URL || 'http://181.93.94.107:8000';
-export const DOG_TOKEN = process.env.EXPO_PUBLIC_DOG_TOKEN || 'dev-operator-token';
-export const DOG_ROBOT_ID = process.env.EXPO_PUBLIC_DOG_ROBOT_ID || 'go2_01';
+export const DOG_API_URL =
+  process.env.EXPO_PUBLIC_DOG_API_URL || 'http://181.93.94.107:8000';
+
+export const DOG_TOKEN =
+  process.env.EXPO_PUBLIC_DOG_TOKEN || 'dev-operator-token';
+
+export const DOG_ROBOT_ID =
+  process.env.EXPO_PUBLIC_DOG_ROBOT_ID || 'go2_01';
 
 // A page served over HTTPS can't fetch() or open a WebSocket against a plain
 // http(s)/ws(s) origin (mixed content): the browser blocks it silently, with

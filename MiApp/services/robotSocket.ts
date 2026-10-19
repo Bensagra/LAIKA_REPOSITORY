@@ -493,13 +493,25 @@ function buildWsUrl(): string {
   return url;
 }
 
+
 function doConnect(gen: number): void {
   if (gen !== currentGen) return;
-  // Claim control before opening the socket (as benyi2.html does), so the
-  // server treats this connection as the operator and accepts drive ops.
+
+  console.log('[RobotWS] Intentando activar el control del robot');
+
   activateDogControl()
-    .catch(() => {})
-    .finally(() => openSocket(gen));
+    .then(() => {
+      console.log('[RobotWS] Activación del control completada');
+    })
+    .catch((err) => {
+      console.error(
+        '[RobotWS] Error al activar el control:',
+        err instanceof Error ? err.message : err
+      );
+    })
+    .finally(() => {
+      openSocket(gen);
+    });
 }
 
 function openSocket(gen: number): void {
@@ -521,15 +533,25 @@ function openSocket(gen: number): void {
       try { handleMessage(event.data); } catch { }
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
+      console.warn('[RobotWS] WebSocket cerrado:', {
+        code: event.code,
+        reason: event.reason,
+        wasClean: event.wasClean,
+      });
+
       invalidateImageQueues();
       cbStatus?.(false);
+
       if (gen === currentGen) {
         reconnectTimer = setTimeout(() => doConnect(gen), 3000);
       }
     };
 
-    socket.onerror = () => { cbStatus?.(false); };
+    socket.onerror = () => {
+      console.error('[RobotWS] Error de conexión WebSocket');
+      cbStatus?.(false);
+    };
   } catch {
     cbStatus?.(false);
     if (gen === currentGen) {

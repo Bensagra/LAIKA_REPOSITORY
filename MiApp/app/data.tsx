@@ -4,15 +4,18 @@ import {
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { listServerMissions, MISSION_STATUS_LABELS, ServerMission } from '../services/missions';
-import { getMissionOverrides, setMissionOverride, MissionOverride } from '../services/missionLocal';
+import { listMyMissionRecords, setMissionOverride, MissionRecord } from '../services/missionRecords';
 import Icon from '../components/Icons';
 import { C, HELV, VIGA } from '../styles/theme';
 import { d } from '../utils/scale';
 
 // "Misiones" library, backed by the server's own recordings (camera.mp4,
 // thermal.mp4, LiDAR map) per "Misiones: instalación, API e integración con
-// otro frontend". Renombrar/borrar son overlays locales (services/missionLocal)
-// porque esa API todavía no los ofrece — ver nota en MisionDetalleScreen.
+// otro frontend". Ownership/rename/hide/notes live in Supabase
+// (services/missionRecords) since the robot API doesn't offer those — and
+// that's also what makes this list private per account: a mission with no
+// record for the signed-in user just doesn't show up, until they (or
+// whoever started it) claims it by starting a mission while logged in.
 
 function formatFecha(unixSeconds: number) {
   return new Date(unixSeconds * 1000).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' });
@@ -27,24 +30,31 @@ function statusColor(status: ServerMission['status']) {
 export default function DataScreen() {
   const router = useRouter();
   const [missions, setMissions] = useState<ServerMission[]>([]);
-  const [overrides, setOverrides] = useState<Record<string, MissionOverride>>({});
+  const [records, setRecords] = useState<Map<string, MissionRecord>>(new Map());
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
-    const [list, ov] = await Promise.all([
+    const [list, myRecords] = await Promise.all([
       listServerMissions().catch(() => []),
-      getMissionOverrides(),
+      listMyMissionRecords().catch((err) => {
+        console.error('[listMyMissionRecords] no se pudieron leer los registros de Supabase', err);
+        return [];
+      }),
     ]);
     setMissions(list);
-    setOverrides(ov);
+    setRecords(new Map(myRecords.map((r) => [r.mission_id, r])));
     setLoading(false);
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const visible = missions.filter((m) => !overrides[m.mission_id]?.hidden);
+  // Private per account: only missions claimed for the signed-in user show up.
+  const visible = missions.filter((m) => {
+    const record = records.get(m.mission_id);
+    return !!record && !record.hidden;
+  });
 
   const exitEdit = () => { setEditing(false); setSelected(new Set()); };
 
@@ -59,11 +69,11 @@ export default function DataScreen() {
   const rename = async () => {
     if (selected.size !== 1 || Platform.OS !== 'web') return;
     const id = [...selected][0];
-    const current = overrides[id]?.name ?? missions.find((m) => m.mission_id === id)?.name ?? '';
+    const current = records.get(id)?.custom_name ?? missions.find((m) => m.mission_id === id)?.name ?? '';
     const next = window.prompt('Nuevo nombre para la misión:', current);
     if (!next || !next.trim()) return;
-    const all = await setMissionOverride(id, { name: next.trim() });
-    setOverrides(all);
+    await setMissionOverride(id, { custom_name: next.trim() }).catch(() => {});
+    await load();
     exitEdit();
   };
 
@@ -73,11 +83,8 @@ export default function DataScreen() {
       ? window.confirm(`¿Borrar ${selected.size} misión(es) de esta lista? (Las grabaciones siguen en el robot, solo se ocultan acá)`)
       : true;
     if (!confirmed) return;
-    let all = overrides;
-    for (const id of selected) {
-      all = await setMissionOverride(id, { hidden: true });
-    }
-    setOverrides(all);
+    await Promise.all([...selected].map((id) => setMissionOverride(id, { hidden: true }).catch(() => {})));
+    await load();
     exitEdit();
   };
 
@@ -104,7 +111,7 @@ export default function DataScreen() {
         <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
           {visible.map((m) => {
             const isSelected = selected.has(m.mission_id);
-            const name = overrides[m.mission_id]?.name ?? m.name;
+            const name = records.get(m.mission_id)?.custom_name ?? m.name;
             return (
               <Pressable
                 key={m.mission_id}
