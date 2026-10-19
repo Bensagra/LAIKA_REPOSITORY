@@ -20,6 +20,7 @@ import { useAppSettings } from '../contexts/AppSettings';
 import { useDeviceBattery } from '../utils/device';
 import Icon, { IconName, WifiIcon } from '../components/Icons';
 import LidarReconstruction, { LidarSink, LidarSinkFrame } from '../components/LidarReconstruction';
+import LidarFloorPlan from '../components/LidarFloorPlan';
 import {
   DOG_API_URL,
   DOG_ROBOT_ID,
@@ -298,6 +299,7 @@ export default function MisionScreen() {
   const [thermalMeta, setThermalMeta] = useState<ThermalFrameMeta | null>(null);
   const [thermalLastAt, setThermalLastAt] = useState(0);
   const [lidarData, setLidarData] = useState<{ points: Float32Array; count: number } | null>(null);
+  const [lidarViewMode, setLidarViewMode] = useState<'2d' | '3d'>('3d');
   const [telemetry, setTelemetry] = useState<Record<string, any> | null>(null);
   const [robotStatus, setRobotStatus] = useState<RobotStatus | null>(null);
   const [rttMs, setRttMs] = useState<number | null>(null);
@@ -318,6 +320,7 @@ export default function MisionScreen() {
 
   const phoneBattery = useDeviceBattery();
   const lidarSinkRef = useRef<LidarSink | null>(null);
+  const lidarFloorSinkRef = useRef<LidarSink | null>(null);
   const lastDataAtRef = useRef(0);
   const lastTelemetryUiRef = useRef(0);
   const lastLidarUiRef = useRef(0);
@@ -488,7 +491,8 @@ export default function MisionScreen() {
         setTelemetry(record);
       },
       onLidar: (points, count, meta) => {
-        // Every frame goes to the 3D map (deltas only carry new points).
+        // Every frame goes to both maps independently (deltas only carry new
+        // points), so toggling between them never resets either one.
         const header = meta?.header as Record<string, any> | undefined;
         const pose = header?.pose;
         const frame: LidarSinkFrame = {
@@ -499,6 +503,7 @@ export default function MisionScreen() {
           path: Array.isArray(header?.path) ? header!.path : null,
         };
         lidarSinkRef.current?.addFrame(frame);
+        lidarFloorSinkRef.current?.addFrame(frame);
         const t = Date.now();
         if (t - lastLidarUiRef.current < 400) return;
         lastLidarUiRef.current = t;
@@ -822,9 +827,21 @@ export default function MisionScreen() {
           <View key={f.key} style={[styles.stageLayer, i !== feedIndex && styles.hidden]}>
             {f.key === 'camera' && <CameraFeed uri={cameraUri} hasFrames={cameraHasFrames} />}
             {f.key === 'thermal' && <ThermalFeed meta={thermalMeta} stale={thermalStale} hasFrames={thermalLastAt > 0} />}
-            {f.key === 'lidar' && (Platform.OS === 'web'
-              ? <LidarReconstruction sinkRef={lidarSinkRef} />
-              : <LidarMapView points={lidarData?.points ?? null} count={lidarData?.count ?? 0} />)}
+            {f.key === 'lidar' && Platform.OS === 'web' && (
+              <>
+                {/* Both stay mounted (and both keep receiving frames above)
+                    so switching modes never resets either one's map. */}
+                <View style={[styles.stageLayer, lidarViewMode !== '3d' && styles.hidden]}>
+                  <LidarReconstruction sinkRef={lidarSinkRef} />
+                </View>
+                <View style={[styles.stageLayer, lidarViewMode !== '2d' && styles.hidden]}>
+                  <LidarFloorPlan sinkRef={lidarFloorSinkRef} />
+                </View>
+              </>
+            )}
+            {f.key === 'lidar' && Platform.OS !== 'web' && (
+              <LidarMapView points={lidarData?.points ?? null} count={lidarData?.count ?? 0} />
+            )}
             {f.key === 'night' && <View style={styles.feed}><Text style={styles.feedEmptyText}>SIN SEÑAL</Text></View>}
           </View>
         ))}
@@ -872,6 +889,23 @@ export default function MisionScreen() {
           </Pressable>
         ))}
       </View>
+
+      {feed.key === 'lidar' && Platform.OS === 'web' && (
+        <View style={styles.lidarModeToggle}>
+          {(['2d', '3d'] as const).map((option) => (
+            <TouchableOpacity
+              key={option}
+              activeOpacity={0.85}
+              style={[styles.lidarModeOption, lidarViewMode === option && styles.lidarModeOptionActive]}
+              onPress={() => setLidarViewMode(option)}
+            >
+              <Text style={[styles.lidarModeOptionText, lidarViewMode === option && styles.lidarModeOptionTextActive]}>
+                {option.toUpperCase()}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
       {/* Controls */}
       <View style={[styles.joyWrap, styles.joyWrapLeft]}>

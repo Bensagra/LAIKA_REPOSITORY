@@ -130,6 +130,30 @@ export const styles = StyleSheet.create({
   dot: { width: d(7), height: d(7), borderRadius: d(3.5), backgroundColor: '#D9D9D9' },
   dotActive: { width: d(24), backgroundColor: C.red },
 
+  // LiDAR 2D/3D toggle (top-right of the LiDAR feed only). Below missionPill
+  // + recPill (rightStack can be up to ~103px tall) so it never overlaps them.
+  lidarModeToggle: {
+    position: 'absolute',
+    top: d(112),
+    right: d(20),
+    flexDirection: 'row',
+    backgroundColor: C.panel,
+    borderRadius: d(11),
+    padding: d(3),
+    gap: d(3),
+    zIndex: 11,
+  },
+  lidarModeOption: {
+    width: d(36),
+    height: d(28),
+    borderRadius: d(8),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lidarModeOptionActive: { backgroundColor: C.red },
+  lidarModeOptionText: { color: C.textDim, fontFamily: HELV, fontWeight: '700', fontSize: d(11.5) },
+  lidarModeOptionTextActive: { color: C.text },
+
   // Joysticks / arrows
   joyWrap: { position: 'absolute', bottom: d(26), zIndex: 10 },
   joyWrapLeft: { left: d(54) },
