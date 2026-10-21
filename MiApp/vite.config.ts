@@ -58,7 +58,18 @@ export default defineConfig(({ mode }) => {
           find: 'expo-sqlite/localStorage/install',
           replacement: path.resolve(__dirname, 'web/shims/expo-sqlite-localstorage-install.ts'),
         },
+        {
+          find: 'expo-linear-gradient',
+          replacement: path.resolve(__dirname, 'web/shims/expo-linear-gradient.tsx'),
+        },
       ],
+    },
+    // Dev-server dep pre-bundling (esbuild) ignores resolve.alias and tries to
+    // scan the real native package directly, which contains JSX esbuild
+    // chokes on outside dev mode's default loader. `vite build` (Rollup) is
+    // unaffected and already uses the shim above; this only matters for `vite`/`npm run web:noexpo`.
+    optimizeDeps: {
+      exclude: ['expo-linear-gradient'],
     },
   };
 });

@@ -76,10 +76,8 @@ export const styles = StyleSheet.create({
     height: d(54),
     borderRadius: d(12),
     backgroundColor: C.red,
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: d(14),
   },
   secondaryButton: {
     height: d(54),
@@ -88,10 +86,22 @@ export const styles = StyleSheet.create({
     backgroundColor: '#3D3434',
     borderWidth: 1,
     borderColor: '#554848',
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: d(12),
+  },
+  // Floats over the button instead of sharing the row with the label, so it
+  // doesn't shrink the label's own width (that's what made longer labels
+  // wrap to two lines). Both buttons use the same box, so the play/folder
+  // icons always end at the same x regardless of icon size or label length.
+  actionIconSlot: {
+    position: 'absolute',
+    left: 0,
+    right: d(326 - 74),
+    top: 0,
+    bottom: 0,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    paddingRight: d(12),
   },
   primaryButtonText: { color: C.text, fontFamily: VIGA, fontSize: d(17), letterSpacing: 0.5 },
 

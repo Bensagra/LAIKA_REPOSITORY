@@ -5,11 +5,13 @@ import {
   Modal,
   Platform,
   Pressable,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -186,7 +188,18 @@ const register = async () => {
 
   return (
     <View style={styles.window}>
-      {Platform.OS === 'web' && React.createElement('div', { style: BACKGROUND_WEB })}
+      {Platform.OS === 'web' ? (
+        React.createElement('div', { style: BACKGROUND_WEB })
+      ) : (
+        <LinearGradient
+          colors={[C.bgTop, '#3a3131', C.bg]}
+          locations={[0, 0.38, 1]}
+          start={{ x: 0.85, y: -0.1 }}
+          end={{ x: 0.35, y: 0.75 }}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+        />
+      )}
 
       {/* Robot selector (page 14): opens/closes, no switching yet. */}
       <View style={styles.robotArea}>
@@ -232,18 +245,22 @@ const register = async () => {
 
       <View style={styles.mainColumn}>
         <View style={styles.logoBlock}>
-          <Text style={styles.logoText}>
+          <Text style={styles.logoText} numberOfLines={1}>
             L<Text style={styles.logoAccent}>AI</Text>KA
           </Text>
           <Text style={styles.logoSub}>rescue dog</Text>
         </View>
         <TouchableOpacity activeOpacity={0.85} style={styles.primaryButton} onPress={() => router.push('/preparar')}>
-          <Icon name="play" size={d(17)} />
-          <Text style={styles.primaryButtonText}>INICIAR MISIÓN</Text>
+          <View style={styles.actionIconSlot}>
+            <Icon name="play" size={d(17)} />
+          </View>
+          <Text style={styles.primaryButtonText} numberOfLines={1}>INICIAR MISIÓN</Text>
         </TouchableOpacity>
         <TouchableOpacity activeOpacity={0.85} style={styles.secondaryButton} onPress={() => router.push('/data')}>
-          <Icon name="folder" size={d(23)} strokeWidth={2.1} />
-          <Text style={styles.primaryButtonText}>MISIONES Y DATOS</Text>
+          <View style={styles.actionIconSlot}>
+            <Icon name="folder" size={d(23)} strokeWidth={2.1} />
+          </View>
+          <Text style={styles.primaryButtonText} numberOfLines={1}>MISIONES Y DATOS</Text>
         </TouchableOpacity>
       </View>
 
