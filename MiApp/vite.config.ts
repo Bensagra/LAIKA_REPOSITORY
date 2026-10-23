@@ -8,7 +8,7 @@ import path from 'node:path';
 // here to be replaced with a literal at build time. Values come from
 // MiApp/.env(.local) locally, or from Vercel's Environment Variables in prod.
 const EXPO_PUBLIC_KEYS = [
-  'EXPO_PUBLIC_DOG_API_URL', 'EXPO_PUBLIC_DOG_TOKEN', 'EXPO_PUBLIC_DOG_ROBOT_ID', 'EXPO_PUBLIC_BACKEND_HOST',
+  'EXPO_PUBLIC_DOG_API_URL', 'EXPO_PUBLIC_DOG_TOKEN', 'EXPO_PUBLIC_DOG_ROBOT_ID',
   'EXPO_PUBLIC_SUPABASE_URL', 'EXPO_PUBLIC_SUPABASE_KEY',
 ];
 
@@ -55,12 +55,16 @@ export default defineConfig(({ mode }) => {
           replacement: path.resolve(__dirname, 'web/shims/react-native-svg.tsx'),
         },
         {
-          find: 'expo-sqlite/localStorage/install',
-          replacement: path.resolve(__dirname, 'web/shims/expo-sqlite-localstorage-install.ts'),
-        },
-        {
           find: 'expo-linear-gradient',
           replacement: path.resolve(__dirname, 'web/shims/expo-linear-gradient.tsx'),
+        },
+        {
+          find: 'expo-battery',
+          replacement: path.resolve(__dirname, 'web/shims/expo-battery.ts'),
+        },
+        {
+          find: 'react-native-live-audio-stream',
+          replacement: path.resolve(__dirname, 'web/shims/react-native-live-audio-stream.ts'),
         },
       ],
     },
@@ -69,7 +73,7 @@ export default defineConfig(({ mode }) => {
     // chokes on outside dev mode's default loader. `vite build` (Rollup) is
     // unaffected and already uses the shim above; this only matters for `vite`/`npm run web:noexpo`.
     optimizeDeps: {
-      exclude: ['expo-linear-gradient'],
+      exclude: ['expo-linear-gradient', 'expo-battery', 'react-native-live-audio-stream'],
     },
   };
 });

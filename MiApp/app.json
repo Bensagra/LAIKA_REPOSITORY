@@ -10,7 +10,8 @@
       },
       "softwareKeyboardLayoutMode": "pan",
       "package": "com.melinakenigsberg.laikAI",
-      "usesCleartextTraffic": true
+      "usesCleartextTraffic": true,
+      "permissions": ["android.permission.RECORD_AUDIO"]
     },
     "ios": {
       "supportsTablet": true,
@@ -18,7 +19,8 @@
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
-        }
+        },
+        "NSMicrophoneUsageDescription": "LAIKA necesita el micrófono para hablar por el parlante del robot."
       }
     },
     "extra": {
@@ -27,7 +29,6 @@
       }
     },
     "plugins": [
-      "expo-sqlite",
       [
         "expo-build-properties",
         {

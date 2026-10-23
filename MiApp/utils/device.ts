@@ -1,30 +1,29 @@
 import { useEffect, useState } from 'react';
+import * as Battery from 'expo-battery';
 
-// Phone/tablet battery via the Battery Status API (Chrome/Edge/Android).
-// Returns null where the browser doesn't expose it (Safari, Firefox, native).
+// Phone/tablet battery level, 0-100 or null if unavailable. On native this is
+// expo-battery for real; on web it's aliased (vite.config.ts) to a shim over
+// the browser's Battery Status API (Chrome/Edge/Android — Safari and Firefox
+// don't expose it, so this stays null there too).
 export function useDeviceBattery(): number | null {
   const [level, setLevel] = useState<number | null>(null);
   useEffect(() => {
-    const nav = (globalThis as any).navigator;
-    if (typeof nav?.getBattery !== 'function') return;
-    let battery: any = null;
-    const update = () => setLevel(Math.round(battery.level * 100));
-    nav.getBattery().then((b: any) => {
-      battery = b;
-      update();
-      b.addEventListener('levelchange', update);
-    }).catch(() => {});
-    return () => battery?.removeEventListener('levelchange', update);
+    let alive = true;
+    Battery.getBatteryLevelAsync()
+      .then((value) => { if (alive && value >= 0) setLevel(Math.round(value * 100)); })
+      .catch(() => {});
+    const sub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
+      if (alive) setLevel(Math.round(batteryLevel * 100));
+    });
+    return () => { alive = false; sub.remove(); };
   }, []);
   return level;
 }
 
 export async function readDeviceBattery(): Promise<number | null> {
-  const nav = (globalThis as any).navigator;
-  if (typeof nav?.getBattery !== 'function') return null;
   try {
-    const b = await nav.getBattery();
-    return Math.round(b.level * 100);
+    const value = await Battery.getBatteryLevelAsync();
+    return value >= 0 ? Math.round(value * 100) : null;
   } catch {
     return null;
   }

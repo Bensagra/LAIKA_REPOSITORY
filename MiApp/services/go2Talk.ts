@@ -1,5 +1,6 @@
-import { Platform } from 'react-native';
+import { AppState, AppStateStatus, Platform } from 'react-native';
 import { DOG_API_URL, DOG_ROBOT_ID, DOG_TOKEN, warnIfMixedContent } from './api';
+import { NativeMicSource, SirenSource as NativeSirenSource } from './nativeTalkAudio';
 
 // Handy: browser mic -> PCM16 mono 16kHz -> wss://.../ws/talk/{robot_id} -> edge
 // -> Go2 speaker. Exclusive per robot, 20s max turn, server/edge also enforce
@@ -114,12 +115,18 @@ export class TalkClient {
   private opening = false;
   private stopped = true;
   private listenersAttached = false;
+  // Native (Android/iOS) audio source — real mic capture or the synthetic
+  // siren generator, see services/nativeTalkAudio.ts. Unused on web, which
+  // drives the same outgoingQueue from the AudioWorklet below instead.
+  private nativeSource: NativeMicSource | NativeSirenSource | null = null;
+  private appStateSub: { remove: () => void } | null = null;
 
   constructor(onStatus: TalkStatusCallback) {
     this.onStatus = onStatus;
     this.handleBlur = this.handleBlur.bind(this);
     this.handleVisibility = this.handleVisibility.bind(this);
     this.handlePageHide = this.handlePageHide.bind(this);
+    this.handleAppStateChange = this.handleAppStateChange.bind(this);
   }
 
   /** True while opening or actively transmitting this turn. */
@@ -133,17 +140,10 @@ export class TalkClient {
   }
 
   async start(connection: TalkConnection = {}, source: TalkSource = 'mic'): Promise<void> {
-    if (Platform.OS !== 'web') {
-      throw new Error(source === 'siren' ? 'La sirena solo está disponible en la web' : 'El micrófono solo está disponible en la web');
-    }
     if (this.active) return;
     this.source = source;
-    if (source === 'mic' && (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia)) {
+    if (Platform.OS === 'web' && source === 'mic' && (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia)) {
       throw new Error('Este navegador no permite acceder al micrófono');
-    }
-    const AudioContextCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextCtor) {
-      throw new Error('Este navegador no soporta AudioContext');
     }
 
     const apiBase = connection.apiBase ?? DOG_API_URL;
@@ -156,7 +156,11 @@ export class TalkClient {
 
     try {
       await this.openSocket(apiBase, token, robotId);
-      await this.openAudio(AudioContextCtor, source);
+      if (Platform.OS === 'web') {
+        await this.openAudioWeb(source);
+      } else {
+        await this.openAudioNative(source);
+      }
       this.attachGlobalListeners();
       this.startedAt = Date.now();
       this.opening = false;
@@ -256,7 +260,24 @@ export class TalkClient {
     });
   }
 
-  private async openAudio(AudioContextCtor: any, source: TalkSource): Promise<void> {
+  private async openAudioNative(source: TalkSource): Promise<void> {
+    const onChunk = (buffer: ArrayBuffer) => this.enqueueChunk(buffer);
+    if (source === 'siren') {
+      const siren = new NativeSirenSource(onChunk);
+      siren.start();
+      this.nativeSource = siren;
+    } else {
+      const mic = new NativeMicSource(onChunk);
+      await mic.start();
+      this.nativeSource = mic;
+    }
+  }
+
+  private async openAudioWeb(source: TalkSource): Promise<void> {
+    const AudioContextCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextCtor) {
+      throw new Error('Este navegador no soporta AudioContext');
+    }
     if (source === 'mic') {
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
@@ -385,6 +406,10 @@ export class TalkClient {
       this.stream.getTracks().forEach((track) => track.stop());
       this.stream = null;
     }
+    if (this.nativeSource) {
+      this.nativeSource.stop();
+      this.nativeSource = null;
+    }
     if (this.audioContext) {
       this.audioContext.close().catch(() => {});
       this.audioContext = null;
@@ -398,20 +423,36 @@ export class TalkClient {
   private handleBlur() { this.stop(); }
   private handleVisibility() { if (document.hidden) this.stop(); }
   private handlePageHide() { this.stop(); }
+  // Backgrounding the app doesn't pause JS timers on its own; without this,
+  // a turn left running while the app is backgrounded would keep streaming
+  // (mic or siren) until its 20s cap, same risk the web blur/hide listeners
+  // below guard against.
+  private handleAppStateChange(state: AppStateStatus) {
+    if (state !== 'active') this.stop();
+  }
 
   private attachGlobalListeners() {
     if (this.listenersAttached) return;
     this.listenersAttached = true;
-    window.addEventListener('blur', this.handleBlur);
-    document.addEventListener('visibilitychange', this.handleVisibility);
-    window.addEventListener('pagehide', this.handlePageHide);
+    if (Platform.OS === 'web') {
+      window.addEventListener('blur', this.handleBlur);
+      document.addEventListener('visibilitychange', this.handleVisibility);
+      window.addEventListener('pagehide', this.handlePageHide);
+    } else {
+      this.appStateSub = AppState.addEventListener('change', this.handleAppStateChange);
+    }
   }
 
   private detachGlobalListeners() {
     if (!this.listenersAttached) return;
     this.listenersAttached = false;
-    window.removeEventListener('blur', this.handleBlur);
-    document.removeEventListener('visibilitychange', this.handleVisibility);
-    window.removeEventListener('pagehide', this.handlePageHide);
+    if (Platform.OS === 'web') {
+      window.removeEventListener('blur', this.handleBlur);
+      document.removeEventListener('visibilitychange', this.handleVisibility);
+      window.removeEventListener('pagehide', this.handlePageHide);
+    } else {
+      this.appStateSub?.remove();
+      this.appStateSub = null;
+    }
   }
 }

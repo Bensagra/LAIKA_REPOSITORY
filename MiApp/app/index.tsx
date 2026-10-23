@@ -14,16 +14,14 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getRobotStatus, setBackendHost, RobotStatus } from '../services/api';
+import { getRobotStatus, RobotStatus } from '../services/api';
 import { supabase } from '../services/supabase';
 import { useAppSettings } from '../contexts/AppSettings';
 import Icon from '../components/Icons';
+import LaikaWordmark from '../components/LaikaWordmark';
 import { styles, SETTINGS_PANEL_W } from '../styles/index';
 import { C } from '../styles/theme';
 import { d } from '../utils/scale';
-
-const BACKEND_IP_KEY = 'laika.backendIp';
 
 // Robot selector entries from the design; only the first one is real for now.
 const ROBOT_OPTIONS = [
@@ -36,6 +34,22 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
   return (
     <Pressable onPress={() => onChange(!value)} style={[styles.toggle, value && styles.toggleOn]}>
       <View style={[styles.toggleThumb, value && styles.toggleThumbOn]} />
+    </Pressable>
+  );
+}
+
+function AuthSwitchLink({ prompt, action, onPress }: { prompt: string; action: string; onPress: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <Pressable
+      onPress={onPress}
+      onHoverIn={() => setHovered(true)}
+      onHoverOut={() => setHovered(false)}
+      style={[styles.authSwitch, Platform.OS === 'web' && ({ cursor: 'pointer' } as any)]}
+    >
+      <Text style={styles.authSwitchText}>
+        {prompt} <Text style={[styles.authSwitchAction, hovered && styles.authSwitchActionHover]}>{action}</Text>
+      </Text>
     </Pressable>
   );
 }
@@ -69,14 +83,18 @@ export default function HomeScreen() {
   const [robotMenuOpen, setRobotMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [authVisible, setAuthVisible] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+
+  const closeAuth = () => {
+    setAuthVisible(false);
+    setAuthMode('login');
+  };
   const panelX = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-    // A backend IP saved by older versions still applies (no UI for it now).
-    AsyncStorage.getItem(BACKEND_IP_KEY).then((saved) => { if (saved) setBackendHost(saved); }).catch(() => {});
   }, []);
 
  useEffect(() => {
@@ -128,62 +146,102 @@ const mostrarAviso = (titulo: string, mensaje: string) => {
 
   Alert.alert(titulo, mensaje);
 };
- const login = async () => {
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: email.trim(),
-    password,
+
+// Supabase's own {data, error} result only covers EXPECTED auth failures
+// (wrong password, etc). An unexpected exception (e.g. a network hiccup
+// deep in the client) isn't caught by checking `error` — it just rejects
+// the promise, and since onPress handlers aren't awaited by the button
+// itself, that becomes a silent unhandled rejection: the button looks like
+// it does nothing at all. withTimeout also turns a genuine hang into a
+// visible error instead of infinite silence.
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('La operación tardó demasiado. Revisá tu conexión e intentá de nuevo.')), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
   });
-
-  if (error) {
-  const detalle = error.message.toLowerCase();
-
-  const mensaje = detalle.includes('invalid login credentials')
-    ? 'El correo o la contraseña son incorrectos. Revisalos e intentá de nuevo.'
-    : detalle.includes('email not confirmed')
-      ? 'Primero confirmá tu correo desde el enlace que te enviamos.'
-      : 'No pudimos iniciar sesión. Revisá tu conexión e intentá de nuevo.';
-
-  mostrarAviso('No se pudo iniciar sesión', mensaje);
-  return;
 }
 
-  setLoggedUser(data.user.email?.split('@')[0] ?? email.trim());
-  setPassword('');
-  setAuthVisible(false);
+ const login = async () => {
+  try {
+    const { data, error } = await withTimeout(supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    }), 15000);
+
+    if (error) {
+      const detalle = error.message.toLowerCase();
+
+      const mensaje = detalle.includes('invalid login credentials')
+        ? 'El correo o la contraseña son incorrectos. Revisalos e intentá de nuevo.'
+        : detalle.includes('email not confirmed')
+          ? 'Primero confirmá tu correo desde el enlace que te enviamos.'
+          : 'No pudimos iniciar sesión. Revisá tu conexión e intentá de nuevo.';
+
+      mostrarAviso('No se pudo iniciar sesión', mensaje);
+      return;
+    }
+
+    setLoggedUser(data.user.email?.split('@')[0] ?? email.trim());
+    setPassword('');
+    closeAuth();
+  } catch (err) {
+    mostrarAviso('No se pudo iniciar sesión', err instanceof Error ? err.message : 'Revisá tu conexión e intentá de nuevo.');
+  }
 };
 
 const register = async () => {
-  const { data, error } = await supabase.auth.signUp({
-    email: email.trim(),
-    password,
-  });
+  try {
+    const { data, error } = await withTimeout(supabase.auth.signUp({
+      email: email.trim(),
+      password,
+    }), 15000);
 
- if (error) {
-  const detalle = error.message.toLowerCase();
+    if (error) {
+      const detalle = error.message.toLowerCase();
 
-  const mensaje = detalle.includes('already registered')
-    ? 'Ya existe una cuenta con ese correo. Iniciá sesión o probá con otro.'
-    : detalle.includes('password')
-      ? 'La contraseña no cumple los requisitos. Probá con una de al menos 6 caracteres.'
-      : detalle.includes('email')
-        ? 'Revisá que el correo esté escrito correctamente.'
-        : 'No pudimos crear la cuenta. Revisá tu conexión e intentá de nuevo.';
+      const mensaje = detalle.includes('already registered')
+        ? 'Ya existe una cuenta con ese correo. Iniciá sesión o probá con otro.'
+        : detalle.includes('password')
+          ? 'La contraseña no cumple los requisitos. Probá con una de al menos 6 caracteres.'
+          : detalle.includes('email')
+            ? 'Revisá que el correo esté escrito correctamente.'
+            : 'No pudimos crear la cuenta. Revisá tu conexión e intentá de nuevo.';
 
-  mostrarAviso('No se pudo completar el registro', mensaje);
-  return;
+      mostrarAviso('No se pudo completar el registro', mensaje);
+      return;
+    }
+
+    setPassword('');
+    closeAuth();
+
+    if (data.session) {
+      mostrarAviso('¡Cuenta creada!', 'Ya podés iniciar sesión.');
+    } else {
+      mostrarAviso(
+        'Confirmá tu correo',
+        `Te enviamos un enlace a ${email.trim()}. Abrilo y luego volvé a la app para iniciar sesión.`
+      );
+    }
+  } catch (err) {
+    mostrarAviso('No se pudo completar el registro', err instanceof Error ? err.message : 'Revisá tu conexión e intentá de nuevo.');
+  }
 }
 
-  setPassword('');
-  setAuthVisible(false);
-
- if (data.session) {
-  mostrarAviso('¡Cuenta creada!', 'Ya podés iniciar sesión.');
-} else {
-  mostrarAviso(
-    'Confirmá tu correo',
-    `Te enviamos un enlace a ${email.trim()}. Abrilo y luego volvé a la app para iniciar sesión.`
-  );
-}
+const logout = async () => {
+  try {
+    const { error } = await withTimeout(supabase.auth.signOut(), 15000);
+    if (error) {
+      mostrarAviso('Cerrar sesión', error.message);
+      return;
+    }
+    setLoggedUser(null);
+    closeAuth();
+  } catch (err) {
+    mostrarAviso('Cerrar sesión', err instanceof Error ? err.message : 'Revisá tu conexión e intentá de nuevo.');
+  }
 }
 
   return (
@@ -235,7 +293,7 @@ const register = async () => {
       </View>
 
       <View style={styles.topRight}>
-        <TouchableOpacity activeOpacity={0.85} style={styles.iconButton} onPress={() => setAuthVisible(true)}>
+        <TouchableOpacity activeOpacity={0.85} style={styles.iconButton} onPress={() => { setAuthMode('login'); setAuthVisible(true); }}>
           <Icon name="user" size={d(24)} strokeWidth={1.9} />
         </TouchableOpacity>
         <TouchableOpacity activeOpacity={0.85} style={styles.iconButton} onPress={() => setSettingsOpen(true)}>
@@ -245,10 +303,7 @@ const register = async () => {
 
       <View style={styles.mainColumn}>
         <View style={styles.logoBlock}>
-          <Text style={styles.logoText} numberOfLines={1}>
-            L<Text style={styles.logoAccent}>AI</Text>KA
-          </Text>
-          <Text style={styles.logoSub}>rescue dog</Text>
+          <LaikaWordmark width={d(301)} />
         </View>
         <TouchableOpacity activeOpacity={0.85} style={styles.primaryButton} onPress={() => router.push('/preparar')}>
           <View style={styles.actionIconSlot}>
@@ -293,12 +348,14 @@ const register = async () => {
         </View>
       </Animated.View>
 
-      <Modal animationType="fade" transparent visible={authVisible} onRequestClose={() => setAuthVisible(false)}>
-        <Pressable style={styles.modalOverlay} onPress={() => setAuthVisible(false)}>
+      <Modal animationType="fade" transparent visible={authVisible} onRequestClose={closeAuth}>
+        <Pressable style={styles.modalOverlay} onPress={closeAuth}>
           <Pressable style={styles.modalCard}>
             <View style={styles.settingsHeader}>
-              <Text style={styles.settingsTitle}>{loggedUser ? 'Cuenta' : 'Iniciar sesión'}</Text>
-              <TouchableOpacity activeOpacity={0.85} style={styles.closeButton} onPress={() => setAuthVisible(false)}>
+              <Text style={styles.settingsTitle}>
+                {loggedUser ? 'CUENTA' : authMode === 'login' ? 'INICIO DE SESIÓN' : 'CREAR CUENTA'}
+              </Text>
+              <TouchableOpacity activeOpacity={0.85} style={styles.closeButton} onPress={closeAuth}>
                 <Icon name="close" size={d(22)} strokeWidth={2.4} />
               </TouchableOpacity>
             </View>
@@ -308,17 +365,8 @@ const register = async () => {
                 <TouchableOpacity
                   activeOpacity={0.85}
                   style={[styles.secondaryButton, styles.modalButton]}
-onPress={async () => {
-  const { error } = await supabase.auth.signOut();
-
-  if (error) {
-    Alert.alert('Cerrar sesión', error.message);
-    return;
-  }
-
-  setLoggedUser(null);
-  setAuthVisible(false);
-}}                >
+                  onPress={logout}
+                >
                   <Text style={styles.modalButtonText}>Cerrar sesión</Text>
                 </TouchableOpacity>
               </>
@@ -328,14 +376,21 @@ onPress={async () => {
                 <TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" style={styles.input} placeholderTextColor={C.textFaint} />
                 <Text style={styles.fieldLabel}>CONTRASEÑA</Text>
                 <TextInput value={password} onChangeText={setPassword} secureTextEntry style={styles.input} placeholderTextColor={C.textFaint} />
-                <View style={styles.modalActions}>
-                  <TouchableOpacity activeOpacity={0.85} style={[styles.secondaryButton, styles.modalButton]} onPress={register}>
-                    <Text style={styles.modalButtonText}>Registrarme</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity activeOpacity={0.85} style={[styles.primaryButton, styles.modalButton]} onPress={login}>
-                    <Text style={styles.modalButtonText}>Ingresar</Text>
-                  </TouchableOpacity>
-                </View>
+                {authMode === 'login' ? (
+                  <>
+                    <TouchableOpacity activeOpacity={0.85} style={[styles.primaryButton, styles.modalButton, styles.modalButtonFull]} onPress={login}>
+                      <Text style={styles.modalButtonText}>Ingresar</Text>
+                    </TouchableOpacity>
+                    <AuthSwitchLink prompt="¿No tenés cuenta?" action="Registrate" onPress={() => setAuthMode('register')} />
+                  </>
+                ) : (
+                  <>
+                    <TouchableOpacity activeOpacity={0.85} style={[styles.primaryButton, styles.modalButton, styles.modalButtonFull]} onPress={register}>
+                      <Text style={styles.modalButtonText}>Registrarme</Text>
+                    </TouchableOpacity>
+                    <AuthSwitchLink prompt="¿Ya tenés cuenta?" action="Iniciá sesión" onPress={() => setAuthMode('login')} />
+                  </>
+                )}
               </>
             )}
           </Pressable>

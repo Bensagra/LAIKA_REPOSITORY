@@ -55,23 +55,9 @@ export const styles = StyleSheet.create({
 
   // Logo + main actions (right-hand column)
   mainColumn: { position: 'absolute', left: d(423), width: d(326), top: d(78) },
+  // "LAIKA" + "rescue dog" render as one vector (components/LaikaWordmark) —
+  // no font metrics to fight with, so sizing is just this margin.
   logoBlock: { alignItems: 'center', marginBottom: d(24) },
-  logoText: {
-    color: C.text,
-    fontFamily: VIGA,
-    fontSize: d(90),
-    lineHeight: d(96),
-    letterSpacing: d(1),
-  },
-  logoAccent: { color: C.red },
-  logoSub: {
-    alignSelf: 'flex-start',
-    marginLeft: d(65),
-    marginTop: d(-10),
-    color: '#A88C8C',
-    fontFamily: HELV,
-    fontSize: d(17),
-  },
   primaryButton: {
     height: d(54),
     borderRadius: d(12),
@@ -190,7 +176,16 @@ export const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: d(13),
   },
-  modalActions: { flexDirection: 'row', gap: d(10), marginTop: d(16) },
   modalButton: { flex: 1, height: d(42), marginTop: 0 },
+  // Cancels modalButton's flex:1 (meant for the old side-by-side row) so a
+  // lone button doesn't stretch to fill the card's height instead of width.
+  modalButtonFull: { flex: 0, marginTop: d(16) },
   modalButtonText: { color: C.text, fontFamily: HELV, fontWeight: '700', fontSize: d(14) },
+
+  // "¿No tenés cuenta? Registrate" / "¿Ya tenés cuenta? Iniciá sesión" link
+  // under the auth form, swapping between the login and register cards.
+  authSwitch: { alignSelf: 'center', marginTop: d(16) },
+  authSwitchText: { color: C.textDim, fontFamily: HELV, fontSize: d(12) },
+  authSwitchAction: { color: C.text, fontFamily: HELV, fontWeight: '700' },
+  authSwitchActionHover: { textDecorationLine: 'underline' },
 });
