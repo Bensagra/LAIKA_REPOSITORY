@@ -167,9 +167,24 @@ export default function PrepararScreen() {
     if (verifying || starting) return;
     setStarting(true);
     const name = nombre.trim() || 'Misión';
-    const server = await startServerMission(name).catch(() => null);
+    let startError: unknown = null;
+    const server = await startServerMission(name).catch((err) => {
+      // Logged loudly (with the real HTTP status/body, not just "it failed")
+      // since this is the single point of failure for the whole mission:
+      // if this call doesn't succeed, nothing about the mission gets saved
+      // anywhere — not the server recording, not the Supabase ownership
+      // record that makes it show up in "Misiones y datos".
+      console.error('[startServerMission] no se pudo iniciar la grabación', err);
+      startError = err;
+      return null;
+    });
     if (!server) {
-      Alert.alert('Misión', 'No se pudo iniciar la grabación en el servidor: la misión va a continuar sin quedar guardada.');
+      const detail = startError instanceof Error ? startError.message : null;
+      Alert.alert(
+        'Misión',
+        'No se pudo iniciar la grabación en el servidor: la misión va a continuar sin quedar guardada.' +
+          (detail ? `\n\nDetalle: ${detail}` : '')
+      );
     } else {
       // Best-effort: if this fails (offline, RLS, etc.) the mission still
       // records on the robot, it just won't show up in "Misiones y datos"

@@ -1,5 +1,6 @@
 import { View } from 'react-native';
 import { Stack } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useFonts, Viga_400Regular } from '@expo-google-fonts/viga';
 import { AppSettingsProvider } from '../contexts/AppSettings';
@@ -17,6 +18,7 @@ export default function RootLayout() {
   }
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <StatusBar hidden />
       <AppSettingsProvider>
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="index" />

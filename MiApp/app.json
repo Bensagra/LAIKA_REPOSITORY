@@ -4,6 +4,9 @@
     "slug": "laikAI",
     "version": "1.0.0",
     "orientation": "landscape",
+    "androidStatusBar": {
+      "hidden": true
+    },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#ffffff"
