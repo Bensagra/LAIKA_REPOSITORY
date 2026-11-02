@@ -34,7 +34,9 @@ export type ThermalFrameMeta = {
     regions?: { x: number; y: number; width: number; height: number; area?: number; max_c?: number }[];
   };
 };
-export type ThermalCallback = (meta: ThermalFrameMeta) => void;
+// dataUri is only set when there's no canvas to draw into (native): a
+// base64 fallback, same pattern as VideoFrameCallback's uri.
+export type ThermalCallback = (meta: ThermalFrameMeta, dataUri?: string) => void;
 // Arducam B0541 on the Raspberry ("Arducam en el frontend"): JPEG frames whose
 // size changes live with the available bandwidth.
 export type ArducamFrameMeta = {
@@ -47,7 +49,7 @@ export type ArducamFrameMeta = {
   source_width?: number;
   source_height?: number;
 };
-export type ArducamCallback = (meta: ArducamFrameMeta) => void;
+export type ArducamCallback = (meta: ArducamFrameMeta, dataUri?: string) => void;
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -389,8 +391,10 @@ function parseFrame(buffer: ArrayBuffer): void {
   if (stream === 'thermal') {
     // Metadata is reported together with its decoded frame.
     const meta = header as ThermalFrameMeta;
-    if (!enqueueImage(thermalQueue, payload, mimeFor(header.image_format), () => cbThermal?.(meta))) {
-      cbThermal?.(meta);
+    const mime = mimeFor(header.image_format);
+    if (!enqueueImage(thermalQueue, payload, mime, () => cbThermal?.(meta))) {
+      // No canvas registered (native): fall back to a base64 data URI, same as video.
+      cbThermal?.(meta, `data:${mime};base64,${uint8ToBase64(payload)}`);
     }
     return;
   }
@@ -398,8 +402,9 @@ function parseFrame(buffer: ArrayBuffer): void {
   if (stream === 'arducam') {
     // Frames that take 3 s or more to decode are dropped, not drawn late.
     const meta = header as ArducamFrameMeta;
-    if (!enqueueImage(arducamQueue, payload, mimeFor(header.image_format), () => cbArducam?.(meta), 3000)) {
-      cbArducam?.(meta);
+    const mime = mimeFor(header.image_format);
+    if (!enqueueImage(arducamQueue, payload, mime, () => cbArducam?.(meta), 3000)) {
+      cbArducam?.(meta, `data:${mime};base64,${uint8ToBase64(payload)}`);
     }
     return;
   }

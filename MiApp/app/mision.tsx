@@ -33,7 +33,9 @@ import {
 } from '../services/api';
 import { TalkClient, TalkSource, TalkStatusMessage } from '../services/go2Talk';
 import { configureDogMedia, DEFAULT_SPEED_PROFILES, NETWORK_PROFILES } from '../services/operator';
-import { stopServerMission } from '../services/missions';
+import { stopServerMission, uploadMissionMedia } from '../services/missions';
+import { CanvasRecorder, captureCanvasPhoto, downloadBlobLocally } from '../utils/canvasCapture';
+import RecordScreen, { RecordingResult } from 'react-native-record-screen';
 import {
   ArducamFrameMeta,
   connectRobotWS,
@@ -58,6 +60,15 @@ const FEEDS: { key: FeedKey; label: string }[] = [
   { key: 'lidar', label: 'LiDAR' },
   { key: 'night', label: 'Nocturna' },
 ];
+
+// Foto/Grabar act on whichever of these three is the current feed (LiDAR
+// has no camera canvas, so it's excluded — see captureFeedKey()).
+type CaptureFeedKey = 'camera' | 'thermal' | 'night';
+const CAMERA_CANVAS_IDS: Record<CaptureFeedKey, string> = {
+  camera: 'laika-camera-canvas',
+  thermal: 'laika-thermal-canvas',
+  night: 'laika-night-canvas',
+};
 
 type Posture = 'parado' | 'agachado';
 type ToastState = { text: string; ok: boolean } | null;
@@ -108,7 +119,7 @@ const CameraFeed = ({ uri, hasFrames }: { uri: string | null; hasFrames: boolean
       {Platform.OS === 'web'
         ? React.createElement('canvas', {
           ref: canvasRef,
-          id: 'laika-camera-canvas',
+          id: CAMERA_CANVAS_IDS.camera,
           style: {
             width: '100%', height: '100%', objectFit: 'cover', display: 'block',
             // Until frames arrive, the design's grey placeholder shows through.
@@ -120,7 +131,7 @@ const CameraFeed = ({ uri, hasFrames }: { uri: string | null; hasFrames: boolean
   );
 };
 
-const ThermalFeed = ({ meta, stale, hasFrames }: { meta: ThermalFrameMeta | null; stale: boolean; hasFrames: boolean }) => {
+const ThermalFeed = ({ meta, stale, hasFrames, uri }: { meta: ThermalFrameMeta | null; stale: boolean; hasFrames: boolean; uri: string | null }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   useEffect(() => {
     if (Platform.OS !== 'web' || !canvasRef.current) return;
@@ -130,10 +141,13 @@ const ThermalFeed = ({ meta, stale, hasFrames }: { meta: ThermalFrameMeta | null
   const fmt = (v?: number) => (typeof v === 'number' && Number.isFinite(v) ? `${v.toFixed(1)}°` : '--');
   return (
     <View style={styles.feed}>
-      {Platform.OS === 'web' && React.createElement('canvas', {
-        ref: canvasRef,
-        style: { width: '100%', height: '100%', objectFit: 'contain', display: 'block', opacity: stale ? 0.35 : 1 },
-      })}
+      {Platform.OS === 'web'
+        ? React.createElement('canvas', {
+          ref: canvasRef,
+          id: CAMERA_CANVAS_IDS.thermal,
+          style: { width: '100%', height: '100%', objectFit: 'contain', display: 'block', opacity: stale ? 0.35 : 1 },
+        })
+        : uri && <Image source={{ uri }} style={[styles.feedImage, { opacity: stale ? 0.35 : 1 }]} resizeMode="contain" />}
       {(!hasFrames || stale) && <Text style={styles.feedEmptyText}>{hasFrames ? 'SEÑAL INTERRUMPIDA' : 'SIN SEÑAL'}</Text>}
       {hasFrames && !stale && (
         <Text style={styles.thermalReadout}>mín {fmt(t?.min_c)} · máx {fmt(t?.max_c)} · centro {fmt(t?.center_c)}</Text>
@@ -144,7 +158,7 @@ const ThermalFeed = ({ meta, stale, hasFrames }: { meta: ThermalFrameMeta | null
 
 // Arducam B0541 (Raspberry CSI). The server sends no cached frame on connect,
 // so the view waits for the next new one.
-const NightFeed = ({ meta, stale, hasFrames }: { meta: ArducamFrameMeta | null; stale: boolean; hasFrames: boolean }) => {
+const NightFeed = ({ meta, stale, hasFrames, uri }: { meta: ArducamFrameMeta | null; stale: boolean; hasFrames: boolean; uri: string | null }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   useEffect(() => {
     if (Platform.OS !== 'web' || !canvasRef.current) return;
@@ -152,10 +166,13 @@ const NightFeed = ({ meta, stale, hasFrames }: { meta: ArducamFrameMeta | null; 
   }, []);
   return (
     <View style={styles.feed}>
-      {Platform.OS === 'web' && React.createElement('canvas', {
-        ref: canvasRef,
-        style: { width: '100%', height: '100%', objectFit: 'contain', display: 'block', opacity: stale ? 0.35 : 1 },
-      })}
+      {Platform.OS === 'web'
+        ? React.createElement('canvas', {
+          ref: canvasRef,
+          id: CAMERA_CANVAS_IDS.night,
+          style: { width: '100%', height: '100%', objectFit: 'contain', display: 'block', opacity: stale ? 0.35 : 1 },
+        })
+        : uri && <Image source={{ uri }} style={[styles.feedImage, { opacity: stale ? 0.35 : 1 }]} resizeMode="contain" />}
       {(!hasFrames || stale) && <Text style={styles.feedEmptyText}>{hasFrames ? 'SEÑAL INTERRUMPIDA' : 'ESPERANDO CÁMARA'}</Text>}
       {hasFrames && !stale && meta?.width && meta?.height && (
         <Text style={styles.thermalReadout}>{meta.width}×{meta.height}</Text>
@@ -331,8 +348,10 @@ export default function MisionScreen() {
   const [cameraHasFrames, setCameraHasFrames] = useState(false);
   const [thermalMeta, setThermalMeta] = useState<ThermalFrameMeta | null>(null);
   const [thermalLastAt, setThermalLastAt] = useState(0);
+  const [thermalUri, setThermalUri] = useState<string | null>(null);
   const [nightMeta, setNightMeta] = useState<ArducamFrameMeta | null>(null);
   const [nightLastAt, setNightLastAt] = useState(0);
+  const [nightUri, setNightUri] = useState<string | null>(null);
   const [lidarData, setLidarData] = useState<{ points: Float32Array; count: number } | null>(null);
   const [lidarViewMode, setLidarViewMode] = useState<'2d' | '3d'>('3d');
   const [telemetry, setTelemetry] = useState<Record<string, any> | null>(null);
@@ -365,8 +384,9 @@ export default function MisionScreen() {
   const flashlightPendingRef = useRef(false);
   const talkClientRef = useRef<TalkClient | null>(null);
   const keyStateRef = useRef<Set<string>>(new Set());
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const recordingDoneRef = useRef<Promise<void> | null>(null);
+  const recorderRef = useRef<CanvasRecorder | null>(null);
+  const nativeRecordingRef = useRef(false);
+  const recordingFeedRef = useRef<CaptureFeedKey>('camera');
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const feedLabelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const feedIndexRef = useRef(0);
@@ -395,6 +415,20 @@ export default function MisionScreen() {
       } else if (message.status === 'stopped') {
         setTalkSource(null);
         setTalkRemaining(null);
+        const missionId = misionActiva?.serverMissionId;
+        if (message.recording && missionId) {
+          const { blob, durationMs } = message.recording;
+          uploadMissionMedia(missionId, 'audio', blob, {
+            filename: `audio-${Date.now()}.wav`,
+            capturedAtMs: Date.now() - durationMs,
+            durationMs,
+          })
+            .then(() => showToast('Audio guardado en la misión'))
+            .catch((err) => {
+              console.error('[uploadMissionMedia] audio', err);
+              showToast('No se pudo guardar el audio en el servidor', false);
+            });
+        }
       } else {
         setTalkSource(null);
         setTalkRemaining(null);
@@ -406,7 +440,7 @@ export default function MisionScreen() {
       client.dispose();
       talkClientRef.current = null;
     };
-  }, [showToast]);
+  }, [showToast, misionActiva]);
 
   useEffect(() => {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
@@ -416,7 +450,8 @@ export default function MisionScreen() {
       clearInterval(tick);
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       if (feedLabelTimerRef.current) clearTimeout(feedLabelTimerRef.current);
-      if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
+      if (recorderRef.current?.active) recorderRef.current.stop();
+      if (nativeRecordingRef.current) { nativeRecordingRef.current = false; RecordScreen.stopRecording().catch(() => {}); }
     };
   }, []);
 
@@ -544,19 +579,21 @@ export default function MisionScreen() {
         lastLidarUiRef.current = t;
         setLidarData({ points, count });
       },
-      onThermal: (meta) => {
+      onThermal: (meta, dataUri) => {
         const t = Date.now();
         if (t - lastThermalUiRef.current < 300) return;
         lastThermalUiRef.current = t;
         setThermalMeta(meta);
         setThermalLastAt(t);
+        if (Platform.OS !== 'web' && dataUri) setThermalUri(dataUri);
       },
-      onArducam: (meta) => {
+      onArducam: (meta, dataUri) => {
         const t = Date.now();
         if (t - lastNightUiRef.current < 300) return;
         lastNightUiRef.current = t;
         setNightMeta(meta);
         setNightLastAt(t);
+        if (Platform.OS !== 'web' && dataUri) setNightUri(dataUri);
       },
     });
     return disconnect;
@@ -695,82 +732,184 @@ export default function MisionScreen() {
     }
   };
 
-  // The server already records camera.mp4 for the whole mission; this is
-  // just a quick local snapshot for the operator, downloaded on the spot
-  // (there is no local mission gallery to save it into anymore).
+  // Whichever of the three camera feeds is on screen right now (Foto/Grabar
+  // always act on that one — LiDAR has no camera canvas to capture).
+  const captureFeedKey = (): CaptureFeedKey | null => {
+    const key = FEEDS[feedIndex].key;
+    return key === 'lidar' ? null : key;
+  };
+
+  const isFeedFresh = (key: CaptureFeedKey): boolean => {
+    if (key === 'camera') {
+      const age = lastFrameAtRef.current ? Date.now() - lastFrameAtRef.current : Infinity;
+      return cameraHasFrames && age <= CAPTURE_MAX_AGE_MS;
+    }
+    if (key === 'thermal') return thermalLastAt > 0 && Date.now() - thermalLastAt <= CAPTURE_MAX_AGE_MS;
+    return nightLastAt > 0 && Date.now() - nightLastAt <= CAPTURE_MAX_AGE_MS;
+  };
+
+  // Current data-URI frame for whichever feed is active — only populated on
+  // native (web draws straight to canvas instead, see CAMERA_CANVAS_IDS).
+  const latestFrameUri = (key: CaptureFeedKey): string | null => {
+    if (key === 'camera') return cameraUri;
+    if (key === 'thermal') return thermalUri;
+    return nightUri;
+  };
+
+  // Uploads to the active mission (services/missions.ts) so it shows up in
+  // "Misiones y datos" afterwards. On web it's also downloaded locally for
+  // the operator; native has no "download to disk" equivalent here, so the
+  // upload is the only record of the capture there.
+  const finishPhoto = (key: CaptureFeedKey, blob: Blob) => {
+    const capturedAtMs = Date.now();
+    const filename = `laika-${DOG_ROBOT_ID}-${key}-${new Date(capturedAtMs).toISOString().replace(/[:.]/g, '-')}.png`;
+    if (Platform.OS === 'web') downloadBlobLocally(blob, filename);
+
+    const missionId = misionActiva?.serverMissionId;
+    if (missionId) {
+      uploadMissionMedia(missionId, 'photo', blob, { filename, capturedAtMs })
+        .then(() => showToast('Foto guardada en la misión'))
+        .catch((err) => {
+          console.error('[uploadMissionMedia] foto', err);
+          showToast(Platform.OS === 'web'
+            ? 'Foto descargada, pero no se pudo guardar en el servidor'
+            : 'No se pudo guardar la foto en el servidor', false);
+        });
+    } else {
+      showToast(Platform.OS === 'web' ? 'Foto descargada' : 'Foto capturada (sin misión activa para guardarla)');
+    }
+  };
+
+  // Snapshot from whichever camera feed is on screen. Web reads the live
+  // canvas; native has no canvas (feeds render as <Image>), so it re-decodes
+  // the latest base64 frame already held in state instead.
   const takePhoto = () => {
-    if (photoActive || Platform.OS !== 'web') {
-      if (Platform.OS !== 'web') showToast('Captura disponible en la web', false);
+    const key = captureFeedKey();
+    if (photoActive || !key) {
+      if (!key) showToast('Esta vista no tiene cámara para capturar', false);
       return;
     }
-    const canvas = document.getElementById('laika-camera-canvas') as HTMLCanvasElement | null;
-    const frameAge = lastFrameAtRef.current ? Date.now() - lastFrameAtRef.current : Infinity;
-    if (!canvas || !cameraHasFrames || canvas.width === 0 || frameAge > CAPTURE_MAX_AGE_MS) {
+    if (!isFeedFresh(key)) {
       showToast('Sin imagen reciente de la cámara', false);
       return;
     }
     setPhotoActive(true);
     setTimeout(() => setPhotoActive(false), PHOTO_HIGHLIGHT_MS);
-    canvas.toBlob((blob) => {
-      if (!blob) { showToast('Sin imagen de cámara', false); return; }
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `laika-${DOG_ROBOT_ID}-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-      showToast('Foto descargada');
-    }, 'image/png');
-  };
 
-  // The server already records camera.mp4 for the whole mission; this is a
-  // quick local clip download for the operator (canvas capture, web only),
-  // same reasoning as takePhoto above.
-  const startRecording = () => {
-    const canvas = Platform.OS === 'web'
-      ? document.getElementById('laika-camera-canvas') as HTMLCanvasElement | null
-      : null;
-    if (!canvas || typeof (canvas as any).captureStream !== 'function' || typeof MediaRecorder === 'undefined') {
-      showToast('Grabación disponible en la web', false);
+    if (Platform.OS === 'web') {
+      const canvas = document.getElementById(CAMERA_CANVAS_IDS[key]) as HTMLCanvasElement | null;
+      if (!canvas || canvas.width === 0) { showToast('Sin imagen reciente de la cámara', false); return; }
+      captureCanvasPhoto(canvas).then((blob) => finishPhoto(key, blob)).catch(() => showToast('Sin imagen de cámara', false));
       return;
     }
-    const stream: MediaStream = (canvas as any).captureStream(15);
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
-    const recorder = new MediaRecorder(stream, { mimeType });
-    const chunks: BlobPart[] = [];
+
+    const uri = latestFrameUri(key);
+    if (!uri) { showToast('Sin imagen de cámara', false); return; }
+    fetch(uri).then((r) => r.blob()).then((blob) => finishPhoto(key, blob)).catch(() => showToast('No se pudo capturar la foto', false));
+  };
+
+  // Clip from whichever camera feed is on screen, uploaded to the mission
+  // same as takePhoto. Web records into its own fixed-size canvas
+  // (CanvasRecorder) rather than the live feed canvas directly, since that
+  // one can change resolution mid-clip (network profile changes) and break
+  // the recording. Native has no canvas to capture at all — there's no
+  // MediaRecorder equivalent for a remote JPEG stream — so it records the
+  // whole device screen instead (react-native-record-screen), which is a
+  // real OS-level screen capture: whatever HUD/buttons are drawn over the
+  // feed get recorded too, not just the camera image like on web.
+  const startRecording = () => {
+    const key = captureFeedKey();
+    if (!key) { showToast('Esta vista no tiene cámara para grabar', false); return; }
+
+    if (Platform.OS !== 'web') {
+      if (!isFeedFresh(key)) { showToast('Sin imagen reciente de la cámara', false); return; }
+      RecordScreen.startRecording({ mic: false })
+        .then((res) => {
+          if (res === RecordingResult.PermissionError) {
+            showToast('Permiso de grabación de pantalla denegado', false);
+            return;
+          }
+          nativeRecordingRef.current = true;
+          recordingFeedRef.current = key;
+          setRecordingSince(Date.now());
+        })
+        .catch((err) => showToast(err instanceof Error ? err.message : 'No se pudo empezar a grabar', false));
+      return;
+    }
+
+    const canvas = document.getElementById(CAMERA_CANVAS_IDS[key]) as HTMLCanvasElement | null;
+    if (!canvas) { showToast('Sin imagen reciente de la cámara', false); return; }
+
     const began = Date.now();
-    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-    recordingDoneRef.current = new Promise<void>((resolve) => {
-      recorder.onstop = () => {
-        stream.getTracks().forEach((track) => track.stop());
-        const durationMs = Date.now() - began;
-        const blob = new Blob(chunks, { type: recorder.mimeType || 'video/webm' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `laika-${DOG_ROBOT_ID}-${new Date(began).toISOString().replace(/[:.]/g, '-')}.webm`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
-        showToast(`Video descargado | ${formatShort(durationMs / 1000)}`);
-        resolve();
-      };
-    });
-    recorder.start(1000);
+    const recorder = new CanvasRecorder(canvas);
+    try {
+      recorder.start();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'No se pudo empezar a grabar', false);
+      return;
+    }
+
     recorderRef.current = recorder;
+    recordingFeedRef.current = key;
     setRecordingSince(began);
   };
 
+  const finishVideo = (key: CaptureFeedKey, blob: Blob, began: number, durationMs: number, ext: 'mp4' | 'webm') => {
+    const filename = `laika-${DOG_ROBOT_ID}-${key}-${new Date(began).toISOString().replace(/[:.]/g, '-')}.${ext}`;
+    if (Platform.OS === 'web') downloadBlobLocally(blob, filename);
+
+    const missionId = misionActiva?.serverMissionId;
+    if (missionId) {
+      uploadMissionMedia(missionId, 'video', blob, { filename, capturedAtMs: began, durationMs })
+        .then(() => showToast(`Video guardado en la misión | ${formatShort(durationMs / 1000)}`))
+        .catch((err) => {
+          console.error('[uploadMissionMedia] video', err);
+          showToast(Platform.OS === 'web'
+            ? 'Video descargado, pero no se pudo guardar en el servidor'
+            : 'No se pudo guardar el video en el servidor', false);
+        });
+    } else {
+      showToast(Platform.OS === 'web'
+        ? `Video descargado | ${formatShort(durationMs / 1000)}`
+        : `Video grabado (sin misión activa para guardarlo) | ${formatShort(durationMs / 1000)}`);
+    }
+  };
+
   const stopRecording = async () => {
+    const key = recordingFeedRef.current;
+    const began = recordingSince ?? Date.now();
+
+    if (Platform.OS !== 'web') {
+      if (!nativeRecordingRef.current) return;
+      nativeRecordingRef.current = false;
+      setRecordingSince(null);
+      const res = await RecordScreen.stopRecording().catch((err) => {
+        showToast(err instanceof Error ? err.message : 'No se pudo detener la grabación', false);
+        return null;
+      });
+      if (!res || res.status !== 'success') {
+        showToast('No se pudo grabar el video', false);
+        return;
+      }
+      const durationMs = Math.max(0, Date.now() - began);
+      try {
+        const blob = await (await fetch(res.result.outputURL)).blob();
+        finishVideo(key, blob, began, durationMs, 'mp4');
+      } catch (err) {
+        console.error('[stopRecording] no se pudo leer el video grabado', err);
+        showToast('No se pudo leer el video grabado', false);
+      }
+      return;
+    }
+
     const recorder = recorderRef.current;
     if (!recorder) return;
     recorderRef.current = null;
     setRecordingSince(null);
-    if (recorder.state !== 'inactive') recorder.stop();
-    await recordingDoneRef.current;
+
+    const result = await recorder.stop();
+    if (!result) { showToast('No se grabó ningún cuadro', false); return; }
+    finishVideo(key, result.blob, began, result.durationMs, result.blob.type.includes('mp4') ? 'mp4' : 'webm');
   };
 
   const choosePosture = (value: Posture) => {
@@ -857,7 +996,7 @@ export default function MisionScreen() {
         {FEEDS.map((f, i) => (
           <View key={f.key} style={[styles.stageLayer, i !== feedIndex && styles.hidden]}>
             {f.key === 'camera' && <CameraFeed uri={cameraUri} hasFrames={cameraHasFrames} />}
-            {f.key === 'thermal' && <ThermalFeed meta={thermalMeta} stale={thermalStale} hasFrames={thermalLastAt > 0} />}
+            {f.key === 'thermal' && <ThermalFeed meta={thermalMeta} stale={thermalStale} hasFrames={thermalLastAt > 0} uri={thermalUri} />}
             {f.key === 'lidar' && Platform.OS === 'web' && (
               <>
                 {/* Both stay mounted (and both keep receiving frames above)
@@ -873,7 +1012,7 @@ export default function MisionScreen() {
             {f.key === 'lidar' && Platform.OS !== 'web' && (
               <LidarMapView points={lidarData?.points ?? null} count={lidarData?.count ?? 0} />
             )}
-            {f.key === 'night' && <NightFeed meta={nightMeta} stale={nightStale} hasFrames={nightLastAt > 0} />}
+            {f.key === 'night' && <NightFeed meta={nightMeta} stale={nightStale} hasFrames={nightLastAt > 0} uri={nightUri} />}
           </View>
         ))}
       </View>

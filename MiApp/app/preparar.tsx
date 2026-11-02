@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Easing, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Animated, Easing, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { getRobotStatus } from '../services/api';
 import { listServerMissions, startServerMission } from '../services/missions';
-import { claimMission } from '../services/missionRecords';
 import { connectRobotWS } from '../services/robotSocket';
 import { useAppSettings } from '../contexts/AppSettings';
 import { hasMicAndSpeaker, readDeviceBattery } from '../utils/device';
@@ -94,7 +93,16 @@ export default function PrepararScreen() {
   const [checks, setChecks] = useState<Record<CheckKey, CheckState>>(() =>
     Object.fromEntries(CHECK_ORDER.map((k) => [k, { status: 'pending', value: '...' }])) as Record<CheckKey, CheckState>);
   const [starting, setStarting] = useState(false);
+  const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null);
   const nameTouched = useRef(false);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = (text: string, ok = false) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ text, ok });
+    toastTimerRef.current = setTimeout(() => setToast(null), 3500);
+  };
+  useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
 
   const setCheck = (key: CheckKey, state: CheckState) => setChecks((prev) => ({ ...prev, [key]: state }));
 
@@ -168,30 +176,21 @@ export default function PrepararScreen() {
     setStarting(true);
     const name = nombre.trim() || 'Misión';
     let startError: unknown = null;
-    const server = await startServerMission(name).catch((err) => {
+    const server = await startServerMission(name, {
+      operator: operador.trim() || undefined,
+      location: ubicacion.trim() || undefined,
+    }).catch((err) => {
       // Logged loudly (with the real HTTP status/body, not just "it failed")
       // since this is the single point of failure for the whole mission:
       // if this call doesn't succeed, nothing about the mission gets saved
-      // anywhere — not the server recording, not the Supabase ownership
-      // record that makes it show up in "Misiones y datos".
-      console.error('[startServerMission] no se pudo iniciar la grabación', err);
+      // anywhere at all.
+      console.error('[startServerMission] no se pudo guardar la misión', err);
       startError = err;
       return null;
     });
     if (!server) {
-      const detail = startError instanceof Error ? startError.message : null;
-      Alert.alert(
-        'Misión',
-        'No se pudo iniciar la grabación en el servidor: la misión va a continuar sin quedar guardada.' +
-          (detail ? `\n\nDetalle: ${detail}` : '')
-      );
-    } else {
-      // Best-effort: if this fails (offline, RLS, etc.) the mission still
-      // records on the robot, it just won't show up in "Misiones y datos"
-      // yet — logged loudly so that silent case is actually diagnosable.
-      await claimMission(server.mission_id).catch((err) => {
-        console.error('[claimMission] no se pudo asociar la misión a la cuenta', err);
-      });
+      showToast('No se pudo guardar la misión en el servidor. Va a continuar, pero no va a quedar registrada.');
+      await wait(1500); // da tiempo a leer el toast antes de navegar a /mision
     }
     setMisionActiva({
       nombre: server?.name ?? name,
@@ -253,6 +252,15 @@ export default function PrepararScreen() {
         {verifying && <PulseDots />}
         {!verifying && !starting && <Icon name="arrowRight" size={d(22)} strokeWidth={2.6} />}
       </TouchableOpacity>
+
+      {toast && (
+        <View style={styles.toast} pointerEvents="none">
+          <View style={[styles.toastIcon, !toast.ok && { backgroundColor: C.textFaint }]}>
+            <Icon name={toast.ok ? 'check' : 'close'} size={d(12)} color="#fff" strokeWidth={3.4} />
+          </View>
+          <Text style={styles.toastText}>{toast.text}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -311,4 +319,20 @@ const styles = StyleSheet.create({
   pulseDot: { width: d(5), height: d(5), borderRadius: d(2.5), backgroundColor: C.textFaint },
   startText: { color: C.text, fontFamily: VIGA, fontSize: d(20), letterSpacing: 0.5 },
   startTextBusy: { color: C.textFaint },
+
+  toast: {
+    position: 'absolute',
+    bottom: d(78),
+    alignSelf: 'center',
+    height: d(34),
+    maxWidth: '85%',
+    paddingHorizontal: d(14),
+    borderRadius: d(8),
+    backgroundColor: C.toast,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: d(8),
+  },
+  toastIcon: { width: d(18), height: d(18), borderRadius: d(9), backgroundColor: C.red, alignItems: 'center', justifyContent: 'center' },
+  toastText: { color: '#2A2424', fontFamily: HELV, fontWeight: '700', fontSize: d(13), flexShrink: 1 },
 });

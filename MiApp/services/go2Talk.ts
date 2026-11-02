@@ -9,7 +9,10 @@ import { NativeMicSource, SirenSource as NativeSirenSource } from './nativeTalkA
 export type TalkStatusMessage =
   | { status: 'opening' }
   | { status: 'talking'; remaining: number }
-  | { status: 'stopped' }
+  // `recording` is only ever set for a 'mic' turn that actually captured
+  // audio (never 'siren') — a WAV of exactly what was streamed, so the
+  // caller can save it as mission media (see app/mision.tsx).
+  | { status: 'stopped'; recording?: { blob: Blob; durationMs: number } }
   | { status: 'error'; error: string };
 
 export type TalkStatusCallback = (message: TalkStatusMessage) => void;
@@ -34,6 +37,41 @@ const WS_CLOSE_REASONS: Record<number, string> = {
   4409: 'Otro operador ya está usando el parlante',
   4410: 'El robot no está disponible en este momento',
 };
+
+// Wraps the exact mono PCM16LE chunks sent to the robot in a standard WAV
+// header — same bytes that went out over the WebSocket, just packaged so
+// any player (and MiApp/services/missions.ts' uploadMissionMedia) can read
+// it as audio/wav. Works identically on web and native: it's plain
+// ArrayBuffer/DataView math, no platform-specific audio API involved.
+function buildWavBlob(pcmChunks: ArrayBuffer[], sampleRate: number): Blob {
+  const totalBytes = pcmChunks.reduce((sum, b) => sum + b.byteLength, 0);
+  const buffer = new ArrayBuffer(44 + totalBytes);
+  const view = new DataView(buffer);
+  let offset = 0;
+  const writeString = (s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(offset++, s.charCodeAt(i)); };
+  const byteRate = sampleRate * 2; // mono, 16-bit
+  writeString('RIFF');
+  view.setUint32(offset, 36 + totalBytes, true); offset += 4;
+  writeString('WAVE');
+  writeString('fmt ');
+  view.setUint32(offset, 16, true); offset += 4; // PCM fmt chunk size
+  view.setUint16(offset, 1, true); offset += 2; // audio format: PCM
+  view.setUint16(offset, 1, true); offset += 2; // channels: mono
+  view.setUint32(offset, sampleRate, true); offset += 4;
+  view.setUint32(offset, byteRate, true); offset += 4;
+  view.setUint16(offset, 2, true); offset += 2; // block align
+  view.setUint16(offset, 16, true); offset += 2; // bits per sample
+  writeString('data');
+  view.setUint32(offset, totalBytes, true); offset += 4;
+
+  const bytes = new Uint8Array(buffer);
+  let pos = 44;
+  for (const chunk of pcmChunks) {
+    bytes.set(new Uint8Array(chunk), pos);
+    pos += chunk.byteLength;
+  }
+  return new Blob([buffer], { type: 'audio/wav' });
+}
 
 // Runs inside an AudioWorkletProcessor (its own realtime thread): downmixes
 // to mono, resamples to 16kHz with linear interpolation and emits fixed
@@ -112,6 +150,12 @@ export class TalkClient {
   // drops old audio rather than queuing it up to dump later.
   private outgoingQueue: ArrayBuffer[] = [];
   private sendTimer: ReturnType<typeof setInterval> | null = null;
+  // Separate from outgoingQueue (which drops chunks under backpressure): a
+  // full, never-dropped copy of every chunk sent this turn, kept only while
+  // source === 'mic' so it can be handed back as a WAV recording when the
+  // turn ends (see finalizeRecording()). Capped by the same 20s server limit
+  // as everything else, so this is at most ~625KB.
+  private recordedChunks: ArrayBuffer[] = [];
   private opening = false;
   private stopped = true;
   private listenersAttached = false;
@@ -182,8 +226,9 @@ export class TalkClient {
     if (ws && ws.readyState === WebSocket.OPEN) {
       try { ws.send(JSON.stringify({ type: 'stop' })); } catch {}
     }
+    const recording = this.finalizeRecording();
     this.cleanup();
-    this.onStatus({ status: 'stopped' });
+    this.onStatus({ status: 'stopped', recording });
   }
 
   /** Stop + drop the global listeners; call when the owning view unmounts. */
@@ -340,10 +385,19 @@ export class TalkClient {
 
   private enqueueChunk(buffer: ArrayBuffer) {
     if (this.stopped) return;
+    if (this.source === 'mic') this.recordedChunks.push(buffer);
     this.outgoingQueue.push(buffer);
     // ~400ms of backlog; if the main thread stalls longer than that, drop
     // the oldest audio instead of piling it up for a later burst.
     while (this.outgoingQueue.length > 10) this.outgoingQueue.shift();
+  }
+
+  /** WAV of everything captured this turn, or undefined if there's nothing
+   * to save (siren turns, or a mic turn that captured zero chunks). */
+  private finalizeRecording(): { blob: Blob; durationMs: number } | undefined {
+    if (this.source !== 'mic' || this.recordedChunks.length === 0) return undefined;
+    const durationMs = Math.round((this.recordedChunks.length * CHUNK_SAMPLES / SAMPLE_RATE) * 1000);
+    return { blob: buildWavBlob(this.recordedChunks, SAMPLE_RATE), durationMs };
   }
 
   private drainOneChunk() {
@@ -363,8 +417,9 @@ export class TalkClient {
     if (this.stopped) return;
     this.stopped = true;
     this.opening = false;
+    const recording = this.finalizeRecording();
     this.cleanup();
-    this.onStatus({ status: 'stopped' });
+    this.onStatus({ status: 'stopped', recording });
   }
 
   private fail(error: string) {
@@ -380,6 +435,7 @@ export class TalkClient {
     if (this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = null; }
     if (this.sendTimer) { clearInterval(this.sendTimer); this.sendTimer = null; }
     this.outgoingQueue = [];
+    this.recordedChunks = [];
     if (this.ws) {
       this.ws.onmessage = null;
       this.ws.onclose = null;

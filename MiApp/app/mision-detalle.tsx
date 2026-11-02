@@ -5,11 +5,10 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
-  ServerMission, MissionPlayback,
-  getServerMission, missionFileUrl, openMissionPlayback,
-  missionPhotoArtifacts, missionAudioArtifacts, formatMissionTime, buildMissionTimeline,
+  ServerMission, MissionFile, MissionEvent,
+  getServerMission, listMissionFiles, getMissionTimeline,
+  formatMissionTime, setMissionNotes,
 } from '../services/missions';
-import { getMissionNotes, setMissionNotes } from '../services/missionRecords';
 import Icon, { IconName } from '../components/Icons';
 import { C, HELV, VIGA } from '../styles/theme';
 import { d } from '../utils/scale';
@@ -65,16 +64,16 @@ function SubTabBtn({ label, active, onPress }: { label: string; active: boolean;
 
 // ── Tabs ─────────────────────────────────────────────────────────────────────
 
-function ResumenTab({ mission }: { mission: ServerMission }) {
-  const photos = missionPhotoArtifacts(mission).length;
-  const audios = missionAudioArtifacts(mission).length;
-  const videos = (mission.streams?.camera ? 1 : 0) + (mission.streams?.thermal ? 1 : 0);
+function ResumenTab({ mission, files }: { mission: ServerMission; files: MissionFile[] }) {
+  const photos = files.filter((f) => f.kind === 'photo').length;
+  const audios = files.filter((f) => f.kind === 'audio').length;
+  const videos = files.filter((f) => f.kind === 'video').length;
   return (
     <View style={styles.resumenRow}>
       <View style={styles.detailsPanel}>
         <Text style={styles.panelTitle}>DETALLES</Text>
-        <DetailRow label="Operador" value={mission.started_by ?? '—'} />
-        <DetailRow label="ID" value={mission.mission_id} />
+        <DetailRow label="Operador" value={mission.operator || '—'} />
+        <DetailRow label="ID" value={mission.mission_id.slice(0, 8).toUpperCase()} />
         <DetailRow label="Robot" value={mission.robot_id} />
         <DetailRow label="Hora de inicio" value={formatHora(mission.started_at)} />
         <DetailRow label="Hora de finalización" value={formatHora(mission.ended_at)} last />
@@ -88,77 +87,57 @@ function ResumenTab({ mission }: { mission: ServerMission }) {
   );
 }
 
-function MultimediaTab({ mission }: { mission: ServerMission }) {
+function MultimediaTab({ files }: { files: MissionFile[] }) {
   const [filter, setFilter] = useState<'todo' | 'fotos' | 'videos'>('todo');
-  const [openTrack, setOpenTrack] = useState<{ key: 'camera' | 'thermal'; label: string } | null>(null);
-  const [playback, setPlayback] = useState<MissionPlayback | null>(null);
-  const [loadingPlayback, setLoadingPlayback] = useState(false);
+  const [openVideo, setOpenVideo] = useState<MissionFile | null>(null);
 
-  const photos = missionPhotoArtifacts(mission);
-  const videoTracks = (['camera', 'thermal'] as const)
-    .filter((k) => !!mission.streams?.[k])
-    .map((k) => ({ key: k, label: k === 'camera' ? 'Cámara' : 'Térmica' }));
+  const photos = files.filter((f) => f.kind === 'photo');
+  const videos = files.filter((f) => f.kind === 'video');
 
   const showVideos = filter !== 'fotos';
   const showPhotos = filter !== 'videos';
-
-  const openVideo = async (track: { key: 'camera' | 'thermal'; label: string }) => {
-    setOpenTrack(track);
-    if (playback) return;
-    setLoadingPlayback(true);
-    try {
-      setPlayback(await openMissionPlayback(mission.mission_id));
-    } catch {
-      // MissionPlayer-style modal below shows nothing playable; close is still available
-    } finally {
-      setLoadingPlayback(false);
-    }
-  };
-
-  const empty = videoTracks.length === 0 && photos.length === 0;
+  const empty = videos.length === 0 && photos.length === 0;
 
   return (
     <View style={{ flex: 1 }}>
       <View style={styles.subTabs}>
-        <SubTabBtn label={`Todo | ${videoTracks.length + photos.length}`} active={filter === 'todo'} onPress={() => setFilter('todo')} />
+        <SubTabBtn label={`Todo | ${videos.length + photos.length}`} active={filter === 'todo'} onPress={() => setFilter('todo')} />
         <SubTabBtn label={`Fotos | ${photos.length}`} active={filter === 'fotos'} onPress={() => setFilter('fotos')} />
-        <SubTabBtn label={`Videos | ${videoTracks.length}`} active={filter === 'videos'} onPress={() => setFilter('videos')} />
+        <SubTabBtn label={`Videos | ${videos.length}`} active={filter === 'videos'} onPress={() => setFilter('videos')} />
       </View>
       {empty ? (
         <Text style={styles.emptySmall}>Sin fotos ni videos en esta misión</Text>
       ) : (
         <ScrollView contentContainerStyle={styles.grid}>
-          {showVideos && videoTracks.map((v) => (
-            <TouchableOpacity key={v.key} activeOpacity={0.85} style={styles.tile} onPress={() => openVideo(v)}>
+          {showVideos && videos.map((v) => (
+            <TouchableOpacity key={v.filename} activeOpacity={0.85} style={styles.tile} onPress={() => setOpenVideo(v)}>
               <View style={styles.tilePlayBadge}>
                 <Icon name="play" size={d(12)} color={C.text} />
               </View>
-              <Text style={styles.tileLabel}>{v.label}</Text>
+              <Text style={styles.tileLabel} numberOfLines={1}>{v.filename}</Text>
             </TouchableOpacity>
           ))}
-          {showPhotos && photos.map((path) => (
-            <View key={path} style={styles.tile}>
-              <Image source={{ uri: missionFileUrl(path) }} style={styles.tileImage} resizeMode="cover" />
+          {showPhotos && photos.map((p) => (
+            <View key={p.filename} style={styles.tile}>
+              <Image source={{ uri: p.url }} style={styles.tileImage} resizeMode="cover" />
             </View>
           ))}
         </ScrollView>
       )}
 
-      <Modal visible={!!openTrack} animationType="fade" transparent onRequestClose={() => setOpenTrack(null)}>
+      <Modal visible={!!openVideo} animationType="fade" transparent onRequestClose={() => setOpenVideo(null)}>
         <View style={styles.videoModalOverlay}>
-          <TouchableOpacity activeOpacity={0.85} style={styles.mapClose} onPress={() => setOpenTrack(null)}>
+          <TouchableOpacity activeOpacity={0.85} style={styles.mapClose} onPress={() => setOpenVideo(null)}>
             <Icon name="close" size={d(22)} color={C.text} />
           </TouchableOpacity>
-          {loadingPlayback && <ActivityIndicator color={C.red} />}
-          {!loadingPlayback && Platform.OS === 'web' && playback && openTrack && playback.videos[openTrack.key] && (
+          {Platform.OS === 'web' && openVideo ? (
             React.createElement('video', {
-              src: missionFileUrl(playback.videos[openTrack.key]!.path),
+              src: openVideo.url,
               controls: true,
               autoPlay: true,
               style: { width: '78vw', maxWidth: 900, maxHeight: '80vh', borderRadius: 12, background: '#000' },
             })
-          )}
-          {!loadingPlayback && (Platform.OS !== 'web' || !playback?.videos[openTrack?.key ?? 'camera']) && (
+          ) : (
             <Text style={[styles.emptySmall, { color: C.text }]}>No se pudo abrir este video.</Text>
           )}
         </View>
@@ -167,8 +146,8 @@ function MultimediaTab({ mission }: { mission: ServerMission }) {
   );
 }
 
-function AudiosTab({ mission }: { mission: ServerMission }) {
-  const audios = missionAudioArtifacts(mission);
+function AudiosTab({ files }: { files: MissionFile[] }) {
+  const audios = files.filter((f) => f.kind === 'audio');
   const [playingIdx, setPlayingIdx] = useState<number | null>(null);
   const audioRefs = useRef<Record<number, HTMLAudioElement | null>>({});
 
@@ -195,15 +174,15 @@ function AudiosTab({ mission }: { mission: ServerMission }) {
 
   return (
     <ScrollView contentContainerStyle={{ gap: d(10), paddingVertical: d(4) }}>
-      {audios.map((path, i) => (
-        <View key={path} style={styles.audioRow}>
+      {audios.map((f, i) => (
+        <View key={f.filename} style={styles.audioRow}>
           <TouchableOpacity activeOpacity={0.85} style={styles.audioPlayBtn} onPress={() => toggle(i)}>
             <Icon name={playingIdx === i ? 'pause' : 'play'} size={d(14)} color={C.text} />
           </TouchableOpacity>
-          <Text style={styles.audioLabel} numberOfLines={1}>{path.split('/').pop()}</Text>
+          <Text style={styles.audioLabel} numberOfLines={1}>{f.filename}</Text>
           {React.createElement('audio', {
             ref: (el: HTMLAudioElement | null) => { audioRefs.current[i] = el; },
-            src: missionFileUrl(path),
+            src: f.url,
             onEnded: () => setPlayingIdx((cur) => (cur === i ? null : cur)),
             style: { display: 'none' },
           })}
@@ -213,8 +192,7 @@ function AudiosTab({ mission }: { mission: ServerMission }) {
   );
 }
 
-function EventosTab({ mission }: { mission: ServerMission }) {
-  const events = buildMissionTimeline(mission);
+function EventosTab({ events }: { events: MissionEvent[] }) {
   return (
     <ScrollView contentContainerStyle={{ paddingVertical: d(4) }}>
       {events.map((e, i) => (
@@ -252,6 +230,8 @@ export default function MisionDetalleScreen() {
   const missionId = typeof id === 'string' ? id : '';
 
   const [mission, setMission] = useState<ServerMission | null>(null);
+  const [files, setFiles] = useState<MissionFile[]>([]);
+  const [events, setEvents] = useState<MissionEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabKey>('resumen');
   const [notes, setNotes] = useState('');
@@ -259,21 +239,22 @@ export default function MisionDetalleScreen() {
 
   useEffect(() => {
     if (!missionId) { setLoading(false); return; }
-    getServerMission(missionId).then(setMission).catch(() => setMission(null)).finally(() => setLoading(false));
-    getMissionNotes(missionId).then(setNotes);
+    Promise.all([getServerMission(missionId), listMissionFiles(missionId), getMissionTimeline(missionId)])
+      .then(([m, f, e]) => { setMission(m); setFiles(f); setEvents(e); setNotes(m.notes); })
+      .catch(() => setMission(null))
+      .finally(() => setLoading(false));
   }, [missionId]);
 
   const updateNotes = (text: string) => {
     setNotes(text);
     if (notesTimer.current) clearTimeout(notesTimer.current);
-    notesTimer.current = setTimeout(() => { setMissionNotes(missionId, text); }, 500);
+    notesTimer.current = setTimeout(() => { setMissionNotes(missionId, text).catch(() => {}); }, 500);
   };
 
   const exportReport = () => {
     if (Platform.OS !== 'web' || !mission) return;
     const win = window.open('', '_blank');
     if (!win) return;
-    const events = buildMissionTimeline(mission);
     win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${mission.name}</title>
       <style>
         body{font-family:Helvetica,Arial,sans-serif;padding:32px;color:#222}
@@ -287,8 +268,8 @@ export default function MisionDetalleScreen() {
       <p>${formatFecha(mission.started_at)}</p>
       <h2>Detalles</h2>
       <table>
-        <tr><td>Operador</td><td>${mission.started_by ?? '—'}</td></tr>
-        <tr><td>ID</td><td>${mission.mission_id}</td></tr>
+        <tr><td>Operador</td><td>${mission.operator || '—'}</td></tr>
+        <tr><td>ID</td><td>${mission.mission_id.slice(0, 8).toUpperCase()}</td></tr>
         <tr><td>Robot</td><td>${mission.robot_id}</td></tr>
         <tr><td>Hora de inicio</td><td>${formatHora(mission.started_at)}</td></tr>
         <tr><td>Hora de finalización</td><td>${formatHora(mission.ended_at)}</td></tr>
@@ -312,7 +293,9 @@ export default function MisionDetalleScreen() {
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={styles.title} numberOfLines={1}>{mission?.name ?? 'Misión'}</Text>
-          <Text style={styles.subtitle}>{mission ? formatFecha(mission.started_at) : ''}</Text>
+          <Text style={styles.subtitle} numberOfLines={1}>
+            {mission ? `${formatFecha(mission.started_at)}${mission.location ? ` | ${mission.location}` : ''}` : ''}
+          </Text>
         </View>
         <TouchableOpacity activeOpacity={0.85} style={styles.exportBtn} onPress={exportReport} disabled={!mission}>
           <Text style={styles.exportBtnText}>Exportar informe</Text>
@@ -339,10 +322,10 @@ export default function MisionDetalleScreen() {
             ))}
           </View>
           <View style={styles.content}>
-            {tab === 'resumen' && <ResumenTab mission={mission} />}
-            {tab === 'multimedia' && <MultimediaTab mission={mission} />}
-            {tab === 'audios' && <AudiosTab mission={mission} />}
-            {tab === 'eventos' && <EventosTab mission={mission} />}
+            {tab === 'resumen' && <ResumenTab mission={mission} files={files} />}
+            {tab === 'multimedia' && <MultimediaTab files={files} />}
+            {tab === 'audios' && <AudiosTab files={files} />}
+            {tab === 'eventos' && <EventosTab events={events} />}
             {tab === 'notas' && <NotasTab value={notes} onChange={updateNotes} />}
           </View>
         </View>

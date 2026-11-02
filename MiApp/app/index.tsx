@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Alert,
   Animated,
   Modal,
   Platform,
@@ -86,10 +85,16 @@ export default function HomeScreen() {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [authNotice, setAuthNotice] = useState<{ text: string; ok: boolean } | null>(null);
 
   const closeAuth = () => {
     setAuthVisible(false);
     setAuthMode('login');
+    setAuthNotice(null);
+  };
+  const switchAuthMode = (mode: 'login' | 'register') => {
+    setAuthMode(mode);
+    setAuthNotice(null);
   };
   const panelX = useRef(new Animated.Value(1)).current;
 
@@ -138,14 +143,15 @@ export default function HomeScreen() {
       ? `Conectado | ${robot?.battery != null ? `${Math.round(robot.battery)}%` : '—'}`
       : 'Sin conexión';
 
-const mostrarAviso = (titulo: string, mensaje: string) => {
-  if (Platform.OS === 'web') {
-    window.alert(`${titulo}\n\n${mensaje}`);
-    return;
-  }
-
-  Alert.alert(titulo, mensaje);
+// Inline notice inside the login/register card — replaces the old
+// window.alert()/Alert.alert() popups.
+const authNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+const mostrarAviso = (mensaje: string, ok = false) => {
+  if (authNoticeTimer.current) clearTimeout(authNoticeTimer.current);
+  setAuthNotice({ text: mensaje, ok });
+  authNoticeTimer.current = setTimeout(() => setAuthNotice(null), 4500);
 };
+useEffect(() => () => { if (authNoticeTimer.current) clearTimeout(authNoticeTimer.current); }, []);
 
 // Supabase's own {data, error} result only covers EXPECTED auth failures
 // (wrong password, etc). An unexpected exception (e.g. a network hiccup
@@ -180,7 +186,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
           ? 'Primero confirmá tu correo desde el enlace que te enviamos.'
           : 'No pudimos iniciar sesión. Revisá tu conexión e intentá de nuevo.';
 
-      mostrarAviso('No se pudo iniciar sesión', mensaje);
+      mostrarAviso(mensaje);
       return;
     }
 
@@ -188,7 +194,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
     setPassword('');
     closeAuth();
   } catch (err) {
-    mostrarAviso('No se pudo iniciar sesión', err instanceof Error ? err.message : 'Revisá tu conexión e intentá de nuevo.');
+    mostrarAviso(err instanceof Error ? err.message : 'Revisá tu conexión e intentá de nuevo.');
   }
 };
 
@@ -210,23 +216,22 @@ const register = async () => {
             ? 'Revisá que el correo esté escrito correctamente.'
             : 'No pudimos crear la cuenta. Revisá tu conexión e intentá de nuevo.';
 
-      mostrarAviso('No se pudo completar el registro', mensaje);
+      mostrarAviso(mensaje);
       return;
     }
 
     setPassword('');
-    closeAuth();
 
     if (data.session) {
-      mostrarAviso('¡Cuenta creada!', 'Ya podés iniciar sesión.');
+      mostrarAviso('¡Cuenta creada! Ya podés iniciar sesión.', true);
     } else {
       mostrarAviso(
-        'Confirmá tu correo',
-        `Te enviamos un enlace a ${email.trim()}. Abrilo y luego volvé a la app para iniciar sesión.`
+        `Te enviamos un enlace a ${email.trim()}. Abrilo y luego volvé a la app para iniciar sesión.`,
+        true
       );
     }
   } catch (err) {
-    mostrarAviso('No se pudo completar el registro', err instanceof Error ? err.message : 'Revisá tu conexión e intentá de nuevo.');
+    mostrarAviso(err instanceof Error ? err.message : 'Revisá tu conexión e intentá de nuevo.');
   }
 }
 
@@ -234,13 +239,13 @@ const logout = async () => {
   try {
     const { error } = await withTimeout(supabase.auth.signOut(), 15000);
     if (error) {
-      mostrarAviso('Cerrar sesión', error.message);
+      mostrarAviso(error.message);
       return;
     }
     setLoggedUser(null);
     closeAuth();
   } catch (err) {
-    mostrarAviso('Cerrar sesión', err instanceof Error ? err.message : 'Revisá tu conexión e intentá de nuevo.');
+    mostrarAviso(err instanceof Error ? err.message : 'Revisá tu conexión e intentá de nuevo.');
   }
 }
 
@@ -362,6 +367,11 @@ const logout = async () => {
             {loggedUser ? (
               <>
                 <Text style={styles.cardTitle}>{loggedUser}</Text>
+                {authNotice && (
+                  <View style={[styles.authNotice, !authNotice.ok && styles.authNoticeError]}>
+                    <Text style={styles.authNoticeText}>{authNotice.text}</Text>
+                  </View>
+                )}
                 <TouchableOpacity
                   activeOpacity={0.85}
                   style={[styles.secondaryButton, styles.modalButton]}
@@ -376,19 +386,24 @@ const logout = async () => {
                 <TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" style={styles.input} placeholderTextColor={C.textFaint} />
                 <Text style={styles.fieldLabel}>CONTRASEÑA</Text>
                 <TextInput value={password} onChangeText={setPassword} secureTextEntry style={styles.input} placeholderTextColor={C.textFaint} />
+                {authNotice && (
+                  <View style={[styles.authNotice, !authNotice.ok && styles.authNoticeError]}>
+                    <Text style={styles.authNoticeText}>{authNotice.text}</Text>
+                  </View>
+                )}
                 {authMode === 'login' ? (
                   <>
                     <TouchableOpacity activeOpacity={0.85} style={[styles.primaryButton, styles.modalButton, styles.modalButtonFull]} onPress={login}>
                       <Text style={styles.modalButtonText}>Ingresar</Text>
                     </TouchableOpacity>
-                    <AuthSwitchLink prompt="¿No tenés cuenta?" action="Registrate" onPress={() => setAuthMode('register')} />
+                    <AuthSwitchLink prompt="¿No tenés cuenta?" action="Registrate" onPress={() => switchAuthMode('register')} />
                   </>
                 ) : (
                   <>
                     <TouchableOpacity activeOpacity={0.85} style={[styles.primaryButton, styles.modalButton, styles.modalButtonFull]} onPress={register}>
                       <Text style={styles.modalButtonText}>Registrarme</Text>
                     </TouchableOpacity>
-                    <AuthSwitchLink prompt="¿Ya tenés cuenta?" action="Iniciá sesión" onPress={() => setAuthMode('login')} />
+                    <AuthSwitchLink prompt="¿Ya tenés cuenta?" action="Iniciá sesión" onPress={() => switchAuthMode('login')} />
                   </>
                 )}
               </>

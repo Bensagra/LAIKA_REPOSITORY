@@ -3,58 +3,37 @@ import {
   ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { listServerMissions, MISSION_STATUS_LABELS, ServerMission } from '../services/missions';
-import { listMyMissionRecords, setMissionOverride, MissionRecord } from '../services/missionRecords';
+import { listServerMissions, renameMission, hideMission, ServerMission } from '../services/missions';
 import Icon from '../components/Icons';
 import { C, HELV, VIGA } from '../styles/theme';
 import { d } from '../utils/scale';
 
-// "Misiones" library, backed by the server's own recordings (camera.mp4,
-// thermal.mp4, LiDAR map) per "Misiones: instalación, API e integración con
-// otro frontend". Ownership/rename/hide/notes live in Supabase
-// (services/missionRecords) since the robot API doesn't offer those — and
-// that's also what makes this list private per account: a mission with no
-// record for the signed-in user just doesn't show up, until they (or
-// whoever started it) claims it by starting a mission while logged in.
+// "Misiones" library: missions live in the backend's own database (not the
+// robot), owned directly by whoever's Supabase session started them — the
+// backend only ever returns the signed-in user's own, non-hidden missions,
+// so there's no separate "claim"/ownership step needed here anymore.
 
 function formatFecha(unixSeconds: number) {
   return new Date(unixSeconds * 1000).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
-function statusColor(status: ServerMission['status']) {
-  if (status === 'completed') return C.green;
-  if (status === 'recording' || status === 'finalizing') return C.yellow;
-  return C.red;
-}
-
 export default function DataScreen() {
   const router = useRouter();
   const [missions, setMissions] = useState<ServerMission[]>([]);
-  const [records, setRecords] = useState<Map<string, MissionRecord>>(new Map());
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
-    const [list, myRecords] = await Promise.all([
-      listServerMissions().catch(() => []),
-      listMyMissionRecords().catch((err) => {
-        console.error('[listMyMissionRecords] no se pudieron leer los registros de Supabase', err);
-        return [];
-      }),
-    ]);
+    const list = await listServerMissions().catch((err) => {
+      console.error('[listServerMissions] no se pudieron cargar las misiones', err);
+      return [];
+    });
     setMissions(list);
-    setRecords(new Map(myRecords.map((r) => [r.mission_id, r])));
     setLoading(false);
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
-
-  // Private per account: only missions claimed for the signed-in user show up.
-  const visible = missions.filter((m) => {
-    const record = records.get(m.mission_id);
-    return !!record && !record.hidden;
-  });
 
   const exitEdit = () => { setEditing(false); setSelected(new Set()); };
 
@@ -69,10 +48,10 @@ export default function DataScreen() {
   const rename = async () => {
     if (selected.size !== 1 || Platform.OS !== 'web') return;
     const id = [...selected][0];
-    const current = records.get(id)?.custom_name ?? missions.find((m) => m.mission_id === id)?.name ?? '';
+    const current = missions.find((m) => m.mission_id === id)?.name ?? '';
     const next = window.prompt('Nuevo nombre para la misión:', current);
     if (!next || !next.trim()) return;
-    await setMissionOverride(id, { custom_name: next.trim() }).catch(() => {});
+    await renameMission(id, next.trim()).catch(() => {});
     await load();
     exitEdit();
   };
@@ -80,10 +59,10 @@ export default function DataScreen() {
   const remove = async () => {
     if (!selected.size) return;
     const confirmed = Platform.OS === 'web'
-      ? window.confirm(`¿Borrar ${selected.size} misión(es) de esta lista? (Las grabaciones siguen en el robot, solo se ocultan acá)`)
+      ? window.confirm(`¿Borrar ${selected.size} misión(es) de esta lista? (Los archivos siguen en el servidor, solo se ocultan acá)`)
       : true;
     if (!confirmed) return;
-    await Promise.all([...selected].map((id) => setMissionOverride(id, { hidden: true }).catch(() => {})));
+    await Promise.all([...selected].map((id) => hideMission(id, true).catch(() => {})));
     await load();
     exitEdit();
   };
@@ -93,7 +72,7 @@ export default function DataScreen() {
       <View style={styles.header}>
         <BackButton router={router} editing={editing} onExitEdit={exitEdit} />
         <Text style={styles.title}>Misiones</Text>
-        <Text style={styles.count}>{visible.length} registrada{visible.length === 1 ? '' : 's'}</Text>
+        <Text style={styles.count}>{missions.length} registrada{missions.length === 1 ? '' : 's'}</Text>
         <View style={{ flex: 1 }} />
         <Pressable
           style={[styles.editBtn, editing && styles.editBtnCancel]}
@@ -105,13 +84,13 @@ export default function DataScreen() {
 
       {loading ? (
         <ActivityIndicator color={C.red} style={{ marginTop: d(60) }} />
-      ) : visible.length === 0 ? (
+      ) : missions.length === 0 ? (
         <Text style={styles.empty}>Todavía no hay misiones registradas</Text>
       ) : (
         <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
-          {visible.map((m) => {
+          {missions.map((m) => {
             const isSelected = selected.has(m.mission_id);
-            const name = records.get(m.mission_id)?.custom_name ?? m.name;
+            const name = m.name;
             return (
               <Pressable
                 key={m.mission_id}
@@ -127,15 +106,9 @@ export default function DataScreen() {
                 )}
                 <Text style={[styles.rowName, isSelected && styles.rowTextOn]} numberOfLines={1}>{name}</Text>
                 <Text style={[styles.rowMeta, isSelected && styles.rowTextOn]} numberOfLines={1}>
-                  {formatFecha(m.started_at)} · {m.robot_id}
+                  {formatFecha(m.started_at)} {m.location ? `| ${m.location}` : `· ${m.robot_id}`}
                 </Text>
                 <View style={{ flex: 1 }} />
-                {!isSelected && (
-                  <View style={[styles.statusPill, { borderColor: statusColor(m.status) }]}>
-                    <View style={[styles.statusDot, { backgroundColor: statusColor(m.status) }]} />
-                    <Text style={[styles.statusText, { color: statusColor(m.status) }]}>{MISSION_STATUS_LABELS[m.status]}</Text>
-                  </View>
-                )}
               </Pressable>
             );
           })}
@@ -216,18 +189,6 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   checkboxOn: { backgroundColor: C.red },
-
-  statusPill: {
-    height: d(24),
-    borderRadius: d(12),
-    borderWidth: 1.5,
-    paddingHorizontal: d(10),
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: d(6),
-  },
-  statusDot: { width: d(7), height: d(7), borderRadius: d(3.5) },
-  statusText: { fontFamily: HELV, fontWeight: '700', fontSize: d(10.5) },
 
   actionBar: {
     flexDirection: 'row', justifyContent: 'flex-end', gap: d(10),

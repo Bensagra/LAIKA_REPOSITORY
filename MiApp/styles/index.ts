@@ -182,6 +182,20 @@ export const styles = StyleSheet.create({
   modalButtonFull: { flex: 0, marginTop: d(16) },
   modalButtonText: { color: C.text, fontFamily: HELV, fontWeight: '700', fontSize: d(14) },
 
+  // Inline notice inside the login/register card (errors in red, confirmations
+  // in green) — replaces native alert() popups.
+  authNotice: {
+    borderRadius: d(10),
+    paddingVertical: d(9),
+    paddingHorizontal: d(12),
+    marginTop: d(10),
+    backgroundColor: 'rgba(60,196,108,0.14)',
+    borderWidth: 1,
+    borderColor: C.green,
+  },
+  authNoticeError: { backgroundColor: 'rgba(232,61,61,0.12)', borderColor: C.red },
+  authNoticeText: { color: C.text, fontFamily: HELV, fontWeight: '700', fontSize: d(12), lineHeight: d(17) },
+
   // "¿No tenés cuenta? Registrate" / "¿Ya tenés cuenta? Iniciá sesión" link
   // under the auth form, swapping between the login and register cards.
   authSwitch: { alignSelf: 'center', marginTop: d(16) },
